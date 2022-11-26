@@ -1,4 +1,4 @@
-#![feature(type_alias_impl_trait)]
+#![cfg_attr(not(feature = "boxed"), feature(type_alias_impl_trait))]
 
 #[cfg(not(loom))]
 use std::thread::LocalKey;
