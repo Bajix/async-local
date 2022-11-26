@@ -2,7 +2,7 @@
 authors = ["Thomas Sieverding <Thomas@bajix.com>"]
 edition = "2021"
 name = "async-local"
-version = "0.1.1"
+version = "0.2.0"
 description = "Building blocks for safely utilizing stable thread-safe references of thread locals variables within an async context and across await points"
 readme = "./README.md"
 license = "MIT"

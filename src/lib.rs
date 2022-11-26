@@ -2,7 +2,7 @@
 
 #[cfg(not(loom))]
 use std::thread::LocalKey;
-use std::{future::Future, marker::PhantomData, ops::Deref, pin::Pin, ptr::addr_of};
+use std::{future::Future, marker::PhantomData, ops::Deref, ptr::addr_of};
 
 #[cfg(loom)]
 use loom::thread::LocalKey;
@@ -228,9 +228,10 @@ where
   /// 2) explicitly constrain the lifetime to any non-'static lifetime such as `async_trait
   unsafe fn guarded_ref<'a>(&'static self) -> RefGuard<'a, Ref>;
 
-  async fn with_async<F, R>(&'static self, f: F) -> R
+  async fn with_async<F, R, Fut>(&'static self, f: F) -> R
   where
-    F: for<'a> FnOnce(&'a LocalRef<Ref>) -> Pin<Box<dyn Future<Output = R> + Send + 'a>> + Send;
+    F: FnOnce(RefGuard<'async_trait, Ref>) -> Fut + Send,
+    Fut: Future<Output = R> + 'async_trait + Send;
 }
 
 #[async_t::async_trait]
@@ -247,13 +248,14 @@ where
     self.with(|value| RefGuard::new(value.as_ref()))
   }
 
-  async fn with_async<F, R>(&'static self, f: F) -> R
+  async fn with_async<F, R, Fut>(&'static self, f: F) -> R
   where
-    F: for<'a> FnOnce(&'a LocalRef<Ref>) -> Pin<Box<dyn Future<Output = R> + Send + 'a>> + Send,
+    F: FnOnce(RefGuard<'async_trait, Ref>) -> Fut + Send,
+    Fut: Future<Output = R> + 'async_trait + Send,
   {
-    let local_ref = unsafe { self.local_ref() };
+    let local_ref = unsafe { self.guarded_ref() };
 
-    f(&local_ref).await
+    f(local_ref).await
   }
 }
 
@@ -277,11 +279,9 @@ mod tests {
   #[tokio::test(flavor = "multi_thread")]
   async fn with_async() {
     COUNTER
-      .with_async(|counter| {
-        Box::pin(async {
-          yield_now().await;
-          counter.deref().fetch_add(1, Ordering::Release);
-        })
+      .with_async(|counter| async move {
+        yield_now().await;
+        counter.deref().fetch_add(1, Ordering::Release);
       })
       .await;
   }
