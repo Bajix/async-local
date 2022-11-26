@@ -74,7 +74,7 @@ where
 }
 
 /// A thread-safe reference to a thread local [`Context`]
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct LocalRef<T: Sync + 'static>(*const Context<T>);
 
 impl<T> LocalRef<T>
@@ -108,11 +108,22 @@ where
   }
 }
 
+impl<T> Clone for LocalRef<T>
+where
+  T: Sync + 'static,
+{
+  fn clone(&self) -> Self {
+    LocalRef(self.0.clone())
+  }
+}
+
+impl<T> Copy for LocalRef<T> where T: Sync + 'static {}
+
 unsafe impl<T> Send for LocalRef<T> where T: Sync {}
 unsafe impl<T> Sync for LocalRef<T> where T: Sync {}
 
 /// A thread-safe reference to a thread-local [`Context`] constrained by a phantom lifetime
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct RefGuard<'a, T: Sync + 'static> {
   inner: *const Context<T>,
   _marker: PhantomData<fn(&'a ()) -> &'a ()>,
@@ -139,6 +150,20 @@ where
     unsafe { (*self.inner).deref() }
   }
 }
+
+impl<'a, T> Clone for RefGuard<'a, T>
+where
+  T: Sync + 'static,
+{
+  fn clone(&self) -> Self {
+    RefGuard {
+      inner: self.inner.clone(),
+      _marker: PhantomData,
+    }
+  }
+}
+
+impl<'a, T> Copy for RefGuard<'a, T> where T: Sync + 'static {}
 
 unsafe impl<'a, T> Send for RefGuard<'a, T> where T: Sync {}
 unsafe impl<'a, T> Sync for RefGuard<'a, T> where T: Sync {}
