@@ -8,9 +8,9 @@ use std::{future::Future, marker::PhantomData, ops::Deref, ptr::addr_of};
 use loom::thread::LocalKey;
 use tokio::{runtime::Handle, task::yield_now};
 
-/// A wrapper around a thread-safe inner type used for creating stable references to thread-locals
+/// A wrapper around a thread-safe inner type used for creating pointers to thread-locals
 /// that are valid for the lifetime of the Tokio runtime and usable within an async context across
-/// await points
+/// await points and not reference counted
 pub struct Context<T: Sync>(T);
 
 impl<T> Context<T>
@@ -75,7 +75,7 @@ where
   }
 }
 
-/// A thread-safe reference to a thread local [`Context`]
+/// A thread-safe pointer to a thread local [`Context`]
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct LocalRef<T: Sync + 'static>(*const Context<T>);
 
@@ -124,7 +124,7 @@ impl<T> Copy for LocalRef<T> where T: Sync + 'static {}
 unsafe impl<T> Send for LocalRef<T> where T: Sync {}
 unsafe impl<T> Sync for LocalRef<T> where T: Sync {}
 
-/// A thread-safe reference to a thread-local [`Context`] constrained by a phantom lifetime
+/// A thread-safe pointer to a thread-local [`Context`] constrained by a phantom lifetime
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct RefGuard<'a, T: Sync + 'static> {
   inner: *const Context<T>,
@@ -170,7 +170,7 @@ impl<'a, T> Copy for RefGuard<'a, T> where T: Sync + 'static {}
 unsafe impl<'a, T> Send for RefGuard<'a, T> where T: Sync {}
 unsafe impl<'a, T> Sync for RefGuard<'a, T> where T: Sync {}
 
-/// LocalKey extension for creating stable thread-safe references to a thread-local [`Context`] that
+/// LocalKey extension for creating stable thread-safe pointers to thread-local [`Context`]s that
 /// are valid for the lifetime of the Tokio runtime and usable within an async context across await
 /// points
 
@@ -180,7 +180,7 @@ where
   T: 'static + AsRef<Context<Ref>>,
   Ref: Sync + 'static,
 {
-  /// Create a thread-safe reference to a thread local [`Context`]
+  /// Create a thread-safe pointer to a thread local [`Context`]
   ///
   /// # Safety
   ///
@@ -210,7 +210,7 @@ where
   /// 5) only use [`std::thread::scope`] with validly created [`LocalRef`]
   unsafe fn local_ref(&'static self) -> LocalRef<Ref>;
 
-  /// Create a lifetime-constrained thread-safe reference to a thread local [`Context`]
+  /// Create a lifetime-constrained thread-safe pointer to a thread local [`Context`]
   ///
   /// # Safety
   ///
