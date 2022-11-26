@@ -1,6 +1,8 @@
+#![feature(type_alias_impl_trait)]
+
 #[cfg(not(loom))]
 use std::thread::LocalKey;
-use std::{marker::PhantomData, ops::Deref, ptr::addr_of};
+use std::{future::Future, marker::PhantomData, ops::Deref, pin::Pin, ptr::addr_of};
 
 #[cfg(loom)]
 use loom::thread::LocalKey;
@@ -171,10 +173,12 @@ unsafe impl<'a, T> Sync for RefGuard<'a, T> where T: Sync {}
 /// LocalKey extension for creating stable thread-safe references to a thread-local [`Context`] that
 /// are valid for the lifetime of the Tokio runtime and usable within an async context across await
 /// points
+
+#[async_t::async_trait]
 pub trait AsyncLocal<T, Ref>
 where
   T: 'static + AsRef<Context<Ref>>,
-  Ref: Sync,
+  Ref: Sync + 'static,
 {
   /// Create a thread-safe reference to a thread local [`Context`]
   ///
@@ -223,12 +227,17 @@ where
   ///
   /// 2) explicitly constrain the lifetime to any non-'static lifetime such as `async_trait
   unsafe fn guarded_ref<'a>(&'static self) -> RefGuard<'a, Ref>;
+
+  async fn with_async<F, R>(&'static self, f: F) -> R
+  where
+    F: for<'a> FnOnce(&'a LocalRef<Ref>) -> Pin<Box<dyn Future<Output = R> + Send + 'a>> + Send;
 }
 
+#[async_t::async_trait]
 impl<T, Ref> AsyncLocal<T, Ref> for LocalKey<T>
 where
   T: 'static + AsRef<Context<Ref>>,
-  Ref: Sync,
+  Ref: Sync + 'static,
 {
   unsafe fn local_ref(&'static self) -> LocalRef<Ref> {
     self.with(|value| LocalRef::new(value.as_ref()))
@@ -236,6 +245,15 @@ where
 
   unsafe fn guarded_ref<'a>(&'static self) -> RefGuard<'a, Ref> {
     self.with(|value| RefGuard::new(value.as_ref()))
+  }
+
+  async fn with_async<F, R>(&'static self, f: F) -> R
+  where
+    F: for<'a> FnOnce(&'a LocalRef<Ref>) -> Pin<Box<dyn Future<Output = R> + Send + 'a>> + Send,
+  {
+    let local_ref = unsafe { self.local_ref() };
+
+    f(&local_ref).await
   }
 }
 
@@ -245,18 +263,51 @@ mod tests {
 
   use super::*;
 
+  thread_local! {
+      static COUNTER: Context<AtomicUsize> = unsafe { Context::new(AtomicUsize::new(0)) };
+  }
+
   #[tokio::test(flavor = "multi_thread")]
   async fn ref_spans_await() {
-    thread_local! {
-        static COUNTER: Context<AtomicUsize> = unsafe { Context::new(AtomicUsize::new(0)) };
-    }
-
     let counter = unsafe { COUNTER.local_ref() };
+    yield_now().await;
+    counter.deref().fetch_add(1, Ordering::Relaxed);
+  }
 
-    for i in 0..100 {
-      yield_now().await;
-      let count = counter.deref().fetch_add(1, Ordering::Relaxed);
-      assert_eq!(i, count);
+  #[tokio::test(flavor = "multi_thread")]
+  async fn with_async() {
+    COUNTER
+      .with_async(|counter| {
+        Box::pin(async {
+          yield_now().await;
+          counter.deref().fetch_add(1, Ordering::Release);
+        })
+      })
+      .await;
+  }
+
+  #[tokio::test(flavor = "multi_thread")]
+  async fn bound_to_async_trait_lifetime() {
+    struct Counter;
+    #[async_t::async_trait]
+    trait Countable {
+      async fn add_one(ref_guard: RefGuard<'async_trait, AtomicUsize>) -> usize;
     }
+
+    #[async_t::async_trait]
+    impl Countable for Counter {
+      // Within this context, RefGuard cannot be moved into a blocking thread because of the
+      // 'async_trait lifetime
+      async fn add_one(counter: RefGuard<'async_trait, AtomicUsize>) -> usize {
+        yield_now().await;
+        counter.deref().fetch_add(1, Ordering::Release)
+      }
+    }
+
+    // here outside of add_one the caller can arbitrarily make this of a 'static lifetime and hence
+    // caution is needed
+    let counter = unsafe { COUNTER.guarded_ref() };
+
+    Counter::add_one(counter).await;
   }
 }

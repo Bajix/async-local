@@ -2,13 +2,14 @@
 authors = ["Thomas Sieverding <Thomas@bajix.com>"]
 edition = "2021"
 name = "async-local"
-version = "0.1.0"
+version = "0.1.1"
 description = "Building blocks for safely utilizing stable thread-safe references of thread locals variables within an async context and across await points"
 readme = "./README.md"
 license = "MIT"
 repository = "https://github.com/Bajix/async-local/"
 
 [dependencies]
+async_t = "0.7.0"
 tokio = { version = "1", features = ["rt"] }
 
 [dev-dependencies]
@@ -24,3 +25,7 @@ loom = { version = "0.5.6", features = [] }
 [lib]
 doctest = false
 bench = false
+
+[features]
+default = []
+boxed = ["async_t/boxed"]
