@@ -231,7 +231,7 @@ where
   async fn with_async<F, R, Fut>(&'static self, f: F) -> R
   where
     F: FnOnce(RefGuard<'async_trait, Ref>) -> Fut + Send,
-    Fut: Future<Output = R> + 'async_trait + Send;
+    Fut: Future<Output = R> + Send;
 }
 
 #[async_t::async_trait]
@@ -251,7 +251,7 @@ where
   async fn with_async<F, R, Fut>(&'static self, f: F) -> R
   where
     F: FnOnce(RefGuard<'async_trait, Ref>) -> Fut + Send,
-    Fut: Future<Output = R> + 'async_trait + Send,
+    Fut: Future<Output = R> + Send,
   {
     let local_ref = unsafe { self.guarded_ref() };
 
