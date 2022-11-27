@@ -1,4 +1,5 @@
 #![cfg_attr(not(feature = "boxed"), feature(type_alias_impl_trait))]
+#![cfg_attr(test, feature(exit_status_error))]
 
 #[cfg(not(loom))]
 use std::thread::LocalKey;
@@ -261,7 +262,11 @@ where
 
 #[cfg(all(test, not(loom)))]
 mod tests {
-  use std::sync::atomic::{AtomicUsize, Ordering};
+  use std::{
+    io,
+    process::{Command, Stdio},
+    sync::atomic::{AtomicUsize, Ordering},
+  };
 
   use super::*;
 
@@ -309,5 +314,18 @@ mod tests {
     let counter = unsafe { COUNTER.guarded_ref() };
 
     Counter::add_one(counter).await;
+  }
+
+  #[test]
+  fn it_safely_shuts_down() -> io::Result<()> {
+    Command::new("cargo")
+      .args(["run", "-p", "doomsday-clock"])
+      .stdout(Stdio::null())
+      .spawn()?
+      .wait()?
+      .exit_ok()
+      .expect("failed to properly shutdown doomsday-clock");
+
+    Ok(())
   }
 }

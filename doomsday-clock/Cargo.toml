@@ -1,0 +1,28 @@
+[package]
+authors = ["Thomas Sieverding <Thomas@bajix.com>"]
+edition = "2021"
+name = "doomsday-clock"
+version = "0.0.1"
+description = ""
+readme = "../README.md"
+license = "MIT"
+repository = "https://github.com/Bajix/async-local/"
+publish = false
+
+[dependencies]
+async-local = { path = "../" }
+num_cpus = "1.14.0"
+pin-project = "1"
+tokio = { version = "1", features = [
+  "macros",
+  "parking_lot",
+  "rt-multi-thread",
+  "rt",
+  "sync",
+] }
+
+[[bin]]
+name = "doomsday-clock"
+doctest = false
+bench = false
+test = false

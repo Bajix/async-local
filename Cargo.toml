@@ -13,11 +13,9 @@ async_t = "0.7.0"
 tokio = { version = "1", features = ["rt"] }
 
 [dev-dependencies]
-tokio = { version = "1", features = [
-  "rt",
-  "macros",
-  "rt-multi-thread",
-] }
+doomsday-clock = { path = "./doomsday-clock" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "rt"] }
+
 
 [target.'cfg(loom)'.dependencies]
 loom = { version = "0.5.6", features = [] }
@@ -29,3 +27,11 @@ bench = false
 [features]
 default = []
 boxed = ["async_t/boxed"]
+
+[workspace]
+members = ["doomsday-clock"]
+
+[profile.release]
+lto = "fat"
+opt-level = 3
+codegen-units = 1
