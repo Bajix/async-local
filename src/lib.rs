@@ -9,8 +9,8 @@ use std::{future::Future, marker::PhantomData, ops::Deref, ptr::addr_of};
 use loom::thread::LocalKey;
 
 /// A wrapper around a thread-safe inner type used for creating pointers to thread-locals
-/// that are valid for the lifetime of the Tokio runtime and usable within an async context across
-/// await points and not reference counted
+/// that are valid for the lifetime of the async runtime and usable within an async context across
+/// await points
 pub struct Context<T: Sync>(T);
 
 impl<T> Context<T>
@@ -33,7 +33,7 @@ where
   ///
   /// # Safety
   ///
-  /// The **only** safe way to use [`Context`] is within a thread local variable that upholds the [pin drop guarantee](https://doc.rust-lang.org/std/pin/index.html#drop-guarantee): it cannot be wrapped in a pointer type nor cell type; and it must not be invalidated nor repurposed until when [drop](https://doc.rust-lang.org/std/ops/trait.Drop.html#tymethod.drop) happens solely as a consequence of the thread dropping. It does not matter which thread [`Context`] is allocated on, and so it is sound to have publicly visible thread locals using [`Context`] without concern for visibility, but it must be guaranteed that references never exist outside of nor outlive the Tokio runtime by upholding the gaurantees enumerated within [`AsyncLocal`] governing the safe usage of [`LocalRef`] and [`RefGuard`].
+  /// The **only** safe way to use [`Context`] is within a thread local variable that upholds the [pin drop guarantee](https://doc.rust-lang.org/std/pin/index.html#drop-guarantee): it cannot be wrapped in a pointer type nor cell type; and it must not be invalidated nor repurposed until when [drop](https://doc.rust-lang.org/std/ops/trait.Drop.html#tymethod.drop) happens solely as a consequence of the thread dropping. It does not matter which thread [`Context`] is allocated on, and so it is sound to have publicly visible thread locals using [`Context`] without concern for visibility, but it must be guaranteed that references never exist outside of nor outlive the async runtime by upholding the gaurantees enumerated within [`AsyncLocal`] governing the safe usage of [`LocalRef`] and [`RefGuard`].
   pub unsafe fn new(inner: T) -> Context<T> {
     Context(inner)
   }
@@ -73,7 +73,7 @@ where
   /// # Safety
   ///
   /// To ensure that it is not possible for [`RefGuard`] to be moved to a thread outside of the
-  /// Tokio runtime, this must be constrained to any non-'static lifetime such as 'async_trait
+  /// async runtime, this must be constrained to any non-'static lifetime such as 'async_trait
   pub unsafe fn guarded_ref<'a>(&self) -> RefGuard<'a, T> {
     RefGuard {
       inner: self.0,
@@ -97,7 +97,7 @@ where
   T: Sync + 'static,
 {
   fn clone(&self) -> Self {
-    LocalRef(self.0.clone())
+    LocalRef(self.0)
   }
 }
 
@@ -141,7 +141,7 @@ where
 {
   fn clone(&self) -> Self {
     RefGuard {
-      inner: self.inner.clone(),
+      inner: self.inner,
       _marker: PhantomData,
     }
   }
@@ -153,7 +153,7 @@ unsafe impl<'a, T> Send for RefGuard<'a, T> where T: Sync {}
 unsafe impl<'a, T> Sync for RefGuard<'a, T> where T: Sync {}
 
 /// LocalKey extension for creating stable thread-safe pointers to thread-local [`Context`]s that
-/// are valid for the lifetime of the Tokio runtime and usable within an async context across await
+/// are valid for the lifetime of the async runtime and usable within an async context across await
 /// points
 
 #[async_t::async_trait]
@@ -167,8 +167,8 @@ where
   /// # Safety
   ///
   /// The **only** safe way to use [`LocalRef`] is as created from and used within the context of
-  /// the Tokio runtime or a thread scoped therein. All behavior must ensure that it is not possible
-  /// for [`LocalRef`] to be created within nor dereferenced on a thread outside of the Tokio
+  /// the async runtime or a thread scoped therein. All behavior must ensure that it is not possible
+  /// for [`LocalRef`] to be created within nor dereferenced on a thread outside of the async
   /// runtime.
   ///
   /// The well-known way of safely accomplishing these guarantees is to:
@@ -178,7 +178,7 @@ where
   /// [`std::future::Future::poll`], async fn, async block or within the drop of a pinned
   /// [`std::future::Future`] that created [`LocalRef`] prior while pinned and polling.
   ///
-  /// 2) limit public usage and ensure that [`LocalRef`] cannot be dereferenced outside of the Tokio
+  /// 2) limit public usage and ensure that [`LocalRef`] cannot be dereferenced outside of the async
   /// runtime context
   ///
   /// 3) use [`pin_project::pinned_drop`](https://docs.rs/pin-project/latest/pin_project/attr.pinned_drop.html) to ensure the safety of dereferencing [`LocalRef`] on drop impl of a pinned future that created [`LocalRef`] while polling.
@@ -197,13 +197,13 @@ where
   /// # Safety
   ///
   /// The **only** safe way to use [`RefGuard`] is as created from and used within the context of
-  /// the Tokio runtime or a thread scoped therein. All behavior must ensure that it is not possible
-  /// for [`RefGuard`] to be created within nor dereferenced on a thread outside of the Tokio
+  /// the async runtime or a thread scoped therein. All behavior must ensure that it is not possible
+  /// for [`RefGuard`] to be created within nor dereferenced on a thread outside of the async
   /// runtime.
   ///
   /// The well-known way of safely accomplishing these guarantees is to:
   ///
-  /// 1) ensure that [`RefGuard`] can only refer to a thread local within the context of the Tokio
+  /// 1) ensure that [`RefGuard`] can only refer to a thread local within the context of the async
   /// runtime by creating within an async context such as [`tokio::spawn`],
   /// [`std::future::Future::poll`], or an async fn
   ///
@@ -307,7 +307,7 @@ mod tests {
       .spawn()?
       .wait()?
       .exit_ok()
-      .expect("failed to properly shutdown doomsday-clock");
+      .expect("tokio failed to shutdown doomsday-clock");
 
     Ok(())
   }
@@ -327,7 +327,29 @@ mod tests {
       .spawn()?
       .wait()?
       .exit_ok()
-      .expect("failed to properly shutdown doomsday-clock");
+      .expect("async-std failed to shutdown doomsday-clock");
+
+    Ok(())
+  }
+
+  #[ignore]
+  #[test]
+  fn smol_safely_shuts_down() -> io::Result<()> {
+    Command::new("cargo")
+      .args([
+        "run",
+        "-p",
+        "doomsday-clock",
+        "--no-default-features",
+        "--features",
+        "smol-runtime",
+      ])
+      .stdout(Stdio::null())
+      .stderr(Stdio::null())
+      .spawn()?
+      .wait()?
+      .exit_ok()
+      .expect("smol to failed to shutdown doomsday-clock");
 
     Ok(())
   }

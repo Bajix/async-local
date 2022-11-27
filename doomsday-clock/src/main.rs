@@ -5,14 +5,20 @@ assert_cfg!(all(
     feature = "tokio-runtime",
     feature = "async-std-runtime"
   )),
-  any(feature = "tokio-runtime", feature = "async-std-runtime")
+  not(all(feature = "tokio-runtime", feature = "smol-runtime")),
+  not(all(feature = "async-std-runtime", feature = "smol-runtime")),
+  any(
+    feature = "tokio-runtime",
+    feature = "async-std-runtime",
+    feature = "smol-runtime"
+  )
 ));
 
 use std::{
   cell::Cell,
   future::Future,
   pin::Pin,
-  sync::atomic::{AtomicIsize, AtomicUsize, Ordering},
+  sync::atomic::{AtomicUsize, Ordering},
   task,
 };
 
@@ -28,11 +34,11 @@ static ARMAMENTS: AtomicUsize = AtomicUsize::new(0);
 pub struct DoomsdayClock {
   core_id: usize,
   seconds_to_midnight: Cell<usize>,
-  warheads: Context<AtomicIsize>,
+  warheads: Context<AtomicUsize>,
 }
 
-impl AsRef<Context<AtomicIsize>> for DoomsdayClock {
-  fn as_ref(&self) -> &Context<AtomicIsize> {
+impl AsRef<Context<AtomicUsize>> for DoomsdayClock {
+  fn as_ref(&self) -> &Context<AtomicUsize> {
     &self.warheads
   }
 }
@@ -44,7 +50,7 @@ impl DoomsdayClock {
     DoomsdayClock {
       core_id,
       seconds_to_midnight: Cell::new(SECONDS_TO_MIDNIGHT),
-      warheads: unsafe { Context::new(AtomicIsize::new(SECONDS_TO_MIDNIGHT as isize)) },
+      warheads: unsafe { Context::new(AtomicUsize::new(SECONDS_TO_MIDNIGHT)) },
     }
   }
 }
@@ -54,17 +60,20 @@ impl Drop for DoomsdayClock {
     let warheads = self.warheads.load(Ordering::Acquire);
 
     match warheads {
-      0 => {
+      0 | SECONDS_TO_MIDNIGHT => {
         if CORE_ID.fetch_sub(1, Ordering::AcqRel).eq(&1) {
           println!("It is {} seconds to midnight", SECONDS_TO_MIDNIGHT);
         }
       }
       1 => {
-        println!("There is one warhead [{}]", self.core_id);
+        println!("There is one warhead at doom's doorstep [{}]", self.core_id);
         panic!("The end is nigh");
       }
       _ => {
-        println!("There are {} warheads at doom's doorstep", warheads,);
+        println!(
+          "There are {} warheads at doom's doorstep [{}]",
+          warheads, self.core_id
+        );
         panic!("The end is nigh");
       }
     }
@@ -78,7 +87,7 @@ thread_local! {
 #[pin_project]
 enum State {
   Proliferating,
-  DoomsdayClock(LocalRef<AtomicIsize>),
+  DoomsdayClock(LocalRef<AtomicUsize>),
 }
 
 #[pin_project(PinnedDrop)]
@@ -98,11 +107,7 @@ impl NuclearWarhead {
 impl PinnedDrop for NuclearWarhead {
   fn drop(mut self: Pin<&mut Self>) {
     if let State::DoomsdayClock(clock) = &self.state {
-      let seconds_to_midnight = clock.fetch_sub(1, Ordering::Release);
-
-      if seconds_to_midnight <= 0 {
-        panic!("The end is nigh")
-      }
+      clock.fetch_sub(1, Ordering::Release);
     }
   }
 }
@@ -159,4 +164,32 @@ async fn main() {
 
   ARSENAL_ARMED.notified().await;
   println!("At doom's doorstep:");
+}
+
+#[cfg(feature = "smol-runtime")]
+fn main() {
+  use easy_parallel::Parallel;
+  use smol::{channel::unbounded, future, Executor};
+
+  let ex = Executor::new();
+  let (signal, shutdown) = unbounded::<()>();
+
+  Parallel::new()
+    .each(0..num_cpus::get(), |_| {
+      future::block_on(ex.run(shutdown.recv()))
+    })
+    .finish(|| {
+      future::block_on(async {
+        for _ in 0..SECONDS_TO_MIDNIGHT * num_cpus::get() * 2 {
+          ex.spawn(async move {
+            NuclearWarhead::proliferate().await;
+          })
+          .detach();
+        }
+
+        ARSENAL_ARMED.notified().await;
+        println!("At doom's doorstep:");
+        drop(signal);
+      })
+    });
 }
