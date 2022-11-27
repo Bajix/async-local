@@ -10,14 +10,13 @@ repository = "https://github.com/Bajix/async-local/"
 publish = false
 
 [dependencies]
+async-std = { version = "1.12.0", features = ["attributes"], optional = true }
 async-local = { path = "../" }
 num_cpus = "1.14.0"
 pin-project = "1"
+static_assertions = "1.1.0"
 tokio = { version = "1", features = [
-  "macros",
   "parking_lot",
-  "rt-multi-thread",
-  "rt",
   "sync",
 ] }
 
@@ -26,3 +25,8 @@ name = "doomsday-clock"
 doctest = false
 bench = false
 test = false
+
+[features]
+default = ["tokio-runtime"]
+async-std-runtime = ["async-std"]
+tokio-runtime = ["tokio/macros", "tokio/rt-multi-thread", "tokio/rt"]

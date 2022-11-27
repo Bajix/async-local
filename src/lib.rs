@@ -7,7 +7,6 @@ use std::{future::Future, marker::PhantomData, ops::Deref, ptr::addr_of};
 
 #[cfg(loom)]
 use loom::thread::LocalKey;
-use tokio::{runtime::Handle, task::yield_now};
 
 /// A wrapper around a thread-safe inner type used for creating pointers to thread-locals
 /// that are valid for the lifetime of the Tokio runtime and usable within an async context across
@@ -34,7 +33,7 @@ where
   ///
   /// # Safety
   ///
-  /// The **only** safe way to use [`Context`] is within a thread local variable that upholds the [pin drop guarantee](https://doc.rust-lang.org/std/pin/index.html#drop-guarantee): it cannot be used nor dropped elsewhere; it cannot be wrapped in a pointer type nor cell type; and it must not be invalidated nor repurposed until when [drop](https://doc.rust-lang.org/std/ops/trait.Drop.html#tymethod.drop) happens solely as a consequence of the thread dropping. It does not matter which thread [`Context`] is allocated on, and so it is sound to have publicly visible thread locals using [`Context`] without concern for visibility, but it must be guaranteed that references never exist outside of nor outlive the Tokio runtime by upholding the gaurantees enumerated within [`AsyncLocal`] governing the safe usage of [`LocalRef`] and [`RefGuard`].
+  /// The **only** safe way to use [`Context`] is within a thread local variable that upholds the [pin drop guarantee](https://doc.rust-lang.org/std/pin/index.html#drop-guarantee): it cannot be wrapped in a pointer type nor cell type; and it must not be invalidated nor repurposed until when [drop](https://doc.rust-lang.org/std/ops/trait.Drop.html#tymethod.drop) happens solely as a consequence of the thread dropping. It does not matter which thread [`Context`] is allocated on, and so it is sound to have publicly visible thread locals using [`Context`] without concern for visibility, but it must be guaranteed that references never exist outside of nor outlive the Tokio runtime by upholding the gaurantees enumerated within [`AsyncLocal`] governing the safe usage of [`LocalRef`] and [`RefGuard`].
   pub unsafe fn new(inner: T) -> Context<T> {
     Context(inner)
   }
@@ -58,24 +57,6 @@ where
     &self.0
   }
 }
-
-/// This ensures that during the Tokio runtime shutdown sequence all tasks are dropped before any
-/// thread drops and that dereferencing during drop is always sound.
-impl<T> Drop for Context<T>
-where
-  T: Sync,
-{
-  fn drop(&mut self) {
-    // If a thread local containing [`Context`] is allocated on a blocking thread, there will be no
-    // references and there will be no runtime to block on
-    while let Ok(handle) = Handle::try_current() {
-      // Ensure all tasks are droppped before any [`Context`] is dropped to so that dangling
-      // references cannot exist
-      handle.block_on(yield_now());
-    }
-  }
-}
-
 /// A thread-safe pointer to a thread local [`Context`]
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct LocalRef<T: Sync + 'static>(*const Context<T>);
@@ -268,6 +249,8 @@ mod tests {
     sync::atomic::{AtomicUsize, Ordering},
   };
 
+  use tokio::task::yield_now;
+
   use super::*;
 
   thread_local! {
@@ -317,9 +300,29 @@ mod tests {
   }
 
   #[test]
-  fn it_safely_shuts_down() -> io::Result<()> {
+  fn tokio_safely_shuts_down() -> io::Result<()> {
     Command::new("cargo")
       .args(["run", "-p", "doomsday-clock"])
+      .stdout(Stdio::null())
+      .spawn()?
+      .wait()?
+      .exit_ok()
+      .expect("failed to properly shutdown doomsday-clock");
+
+    Ok(())
+  }
+
+  #[test]
+  fn async_std_safely_shuts_down() -> io::Result<()> {
+    Command::new("cargo")
+      .args([
+        "run",
+        "-p",
+        "doomsday-clock",
+        "--no-default-features",
+        "--features",
+        "async-std-runtime",
+      ])
       .stdout(Stdio::null())
       .spawn()?
       .wait()?

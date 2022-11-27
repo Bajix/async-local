@@ -10,7 +10,6 @@ repository = "https://github.com/Bajix/async-local/"
 
 [dependencies]
 async_t = "0.7.0"
-tokio = { version = "1", features = ["rt"] }
 
 [dev-dependencies]
 doomsday-clock = { path = "./doomsday-clock" }

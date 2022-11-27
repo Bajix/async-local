@@ -1,5 +1,13 @@
 #![feature(cell_update)]
 
+assert_cfg!(all(
+  not(all(
+    feature = "tokio-runtime",
+    feature = "async-std-runtime"
+  )),
+  any(feature = "tokio-runtime", feature = "async-std-runtime")
+));
+
 use std::{
   cell::Cell,
   future::Future,
@@ -10,6 +18,7 @@ use std::{
 
 use async_local::{AsyncLocal, Context, LocalRef};
 use pin_project::{pin_project, pinned_drop};
+use static_assertions::assert_cfg;
 use tokio::sync::Notify;
 
 const SECONDS_TO_MIDNIGHT: usize = 100;
@@ -126,10 +135,24 @@ impl Future for NuclearWarhead {
   }
 }
 
+#[cfg(feature = "tokio-runtime")]
 #[tokio::main]
 async fn main() {
   for _ in 0..SECONDS_TO_MIDNIGHT * num_cpus::get() * 2 {
     tokio::task::spawn(async move {
+      NuclearWarhead::proliferate().await;
+    });
+  }
+
+  ARSENAL_ARMED.notified().await;
+  println!("At doom's doorstep:");
+}
+
+#[cfg(feature = "async-std-runtime")]
+#[async_std::main]
+async fn main() {
+  for _ in 0..SECONDS_TO_MIDNIGHT * num_cpus::get() * 2 {
+    async_std::task::spawn(async move {
       NuclearWarhead::proliferate().await;
     });
   }
