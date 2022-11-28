@@ -345,7 +345,6 @@ mod tests {
         "smol-runtime",
       ])
       .stdout(Stdio::null())
-      .stderr(Stdio::null())
       .spawn()?
       .wait()?
       .exit_ok()

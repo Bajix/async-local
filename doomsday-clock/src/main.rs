@@ -18,7 +18,7 @@ use std::{
   cell::Cell,
   future::Future,
   pin::Pin,
-  sync::atomic::{AtomicUsize, Ordering},
+  sync::atomic::{AtomicBool, AtomicUsize, Ordering},
   task,
 };
 
@@ -28,18 +28,21 @@ use static_assertions::assert_cfg;
 use tokio::sync::Notify;
 
 const SECONDS_TO_MIDNIGHT: usize = 100;
+const ARSENAL_SIZE: usize = 1600;
+
 static CORE_ID: AtomicUsize = AtomicUsize::new(0);
 static ARSENAL_ARMED: Notify = Notify::const_new();
 static ARMAMENTS: AtomicUsize = AtomicUsize::new(0);
+static CLOCK_DROPPED: AtomicBool = AtomicBool::new(false);
 pub struct DoomsdayClock {
   core_id: usize,
-  seconds_to_midnight: Cell<usize>,
-  warheads: Context<AtomicUsize>,
+  armed: Cell<usize>,
+  disarmed: Context<AtomicUsize>,
 }
 
 impl AsRef<Context<AtomicUsize>> for DoomsdayClock {
   fn as_ref(&self) -> &Context<AtomicUsize> {
-    &self.warheads
+    &self.disarmed
   }
 }
 
@@ -49,27 +52,30 @@ impl DoomsdayClock {
 
     DoomsdayClock {
       core_id,
-      seconds_to_midnight: Cell::new(SECONDS_TO_MIDNIGHT),
-      warheads: unsafe { Context::new(AtomicUsize::new(SECONDS_TO_MIDNIGHT)) },
+      armed: Cell::new(0),
+      disarmed: unsafe { Context::new(AtomicUsize::new(0)) },
     }
   }
 }
 
 impl Drop for DoomsdayClock {
   fn drop(&mut self) {
-    let warheads = self.warheads.load(Ordering::Acquire);
+    CLOCK_DROPPED.fetch_or(true, Ordering::Release);
 
-    match warheads {
-      0 | SECONDS_TO_MIDNIGHT => {
+    let armed = self.armed.get();
+    let disarmed = self.disarmed.load(Ordering::Acquire);
+
+    match (disarmed, armed - disarmed) {
+      (0, _) | (_, 0) => {
         if CORE_ID.fetch_sub(1, Ordering::AcqRel).eq(&1) {
           println!("It is {} seconds to midnight", SECONDS_TO_MIDNIGHT);
         }
       }
-      1 => {
+      (_, 1) => {
         println!("There is one warhead at doom's doorstep [{}]", self.core_id);
         panic!("The end is nigh");
       }
-      _ => {
+      (_, warheads) => {
         println!(
           "There are {} warheads at doom's doorstep [{}]",
           warheads, self.core_id
@@ -87,11 +93,14 @@ thread_local! {
 #[pin_project]
 enum State {
   Proliferating,
-  DoomsdayClock(LocalRef<AtomicUsize>),
+  DoomsdayClock {
+    clock: LocalRef<AtomicUsize>,
+    core_id: usize,
+  },
 }
 
 #[pin_project(PinnedDrop)]
-struct NuclearWarhead {
+pub struct NuclearWarhead {
   state: State,
 }
 
@@ -106,8 +115,12 @@ impl NuclearWarhead {
 #[pinned_drop]
 impl PinnedDrop for NuclearWarhead {
   fn drop(mut self: Pin<&mut Self>) {
-    if let State::DoomsdayClock(clock) = &self.state {
-      clock.fetch_sub(1, Ordering::Release);
+    if CLOCK_DROPPED.load(Ordering::Acquire) {
+      panic!("NulcearWarhead dropped after DoomsdayClock: dangling references will occur");
+    }
+
+    if let State::DoomsdayClock { clock, core_id: _ } = &self.state {
+      clock.fetch_add(1, Ordering::Release);
     }
   }
 }
@@ -119,23 +132,32 @@ impl Future for NuclearWarhead {
 
     match this.state {
       State::Proliferating => {
-        let arsenal_acquired = DOOMSDAY_CLOCK.with(|clock| clock.seconds_to_midnight.get().eq(&0));
+        let clock = unsafe { DOOMSDAY_CLOCK.local_ref() };
 
-        if !arsenal_acquired {
-          DOOMSDAY_CLOCK.with(|clock| clock.seconds_to_midnight.update(|n| n.saturating_sub(1)));
-          let clock = unsafe { DOOMSDAY_CLOCK.local_ref() };
-          let _ = std::mem::replace(this.state, State::DoomsdayClock(clock));
+        let core_id = DOOMSDAY_CLOCK.with(|clock| {
+          clock.armed.update(|n| n + 1);
+          clock.core_id
+        });
+
+        let _ = std::mem::replace(this.state, State::DoomsdayClock { clock, core_id });
+
+        cx.waker().wake_by_ref();
+
+        task::Poll::Pending
+      }
+      State::DoomsdayClock { clock: _, core_id } => {
+        if DOOMSDAY_CLOCK.with(|clock| clock.core_id).eq(&core_id) {
+          cx.waker().wake_by_ref();
+        } else {
           let armed = ARMAMENTS.fetch_add(1, Ordering::Relaxed) + 1;
-          if armed == (SECONDS_TO_MIDNIGHT * num_cpus::get()) {
+
+          if armed == ARSENAL_SIZE {
             ARSENAL_ARMED.notify_one();
           }
-        } else {
-          cx.waker().wake_by_ref();
         }
 
         task::Poll::Pending
       }
-      State::DoomsdayClock(_) => task::Poll::Pending,
     }
   }
 }
@@ -143,7 +165,7 @@ impl Future for NuclearWarhead {
 #[cfg(feature = "tokio-runtime")]
 #[tokio::main]
 async fn main() {
-  for _ in 0..SECONDS_TO_MIDNIGHT * num_cpus::get() * 2 {
+  for _ in 0..ARSENAL_SIZE {
     tokio::task::spawn(async move {
       NuclearWarhead::proliferate().await;
     });
@@ -156,7 +178,7 @@ async fn main() {
 #[cfg(feature = "async-std-runtime")]
 #[async_std::main]
 async fn main() {
-  for _ in 0..SECONDS_TO_MIDNIGHT * num_cpus::get() * 2 {
+  for _ in 0..ARSENAL_SIZE * 2 {
     async_std::task::spawn(async move {
       NuclearWarhead::proliferate().await;
     });
@@ -180,7 +202,7 @@ fn main() {
     })
     .finish(|| {
       future::block_on(async {
-        for _ in 0..SECONDS_TO_MIDNIGHT * num_cpus::get() * 2 {
+        for _ in 0..ARSENAL_SIZE {
           ex.spawn(async move {
             NuclearWarhead::proliferate().await;
           })
