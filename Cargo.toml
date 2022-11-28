@@ -15,7 +15,6 @@ async_t = "0.7.0"
 doomsday-clock = { path = "./doomsday-clock" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "rt"] }
 
-
 [target.'cfg(loom)'.dependencies]
 loom = { version = "0.5.6", features = [] }
 

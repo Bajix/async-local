@@ -73,7 +73,7 @@ where
   /// # Safety
   ///
   /// To ensure that it is not possible for [`RefGuard`] to be moved to a thread outside of the
-  /// async runtime, this must be constrained to any non-'static lifetime such as 'async_trait
+  /// async runtime, this must be constrained to any non-`'static` lifetime such as `'async_trait`
   pub unsafe fn guarded_ref<'a>(&self) -> RefGuard<'a, T> {
     RefGuard {
       inner: self.0,
@@ -174,7 +174,7 @@ where
   /// The well-known way of safely accomplishing these guarantees is to:
   ///
   /// 1) ensure that [`LocalRef`] can only refer to a thread local within the context of the runtime
-  /// by creating and using only within an async context such as [`tokio::spawn`],
+  /// by creating and using only within an async context such as [`tokio::spawn`](https://docs.rs/tokio/latest/tokio/fn.spawn.html),
   /// [`std::future::Future::poll`], async fn, async block or within the drop of a pinned
   /// [`std::future::Future`] that created [`LocalRef`] prior while pinned and polling.
   ///
@@ -186,7 +186,7 @@ where
   /// 4) ensure that a move into [`std::thread`] cannot occur or otherwise that [`LocalRef`] cannot
   /// be created nor derefenced outside of an async context by constraining use exclusively to
   /// within a pinned [`std::future::Future`] being polled or dropped and otherwise using
-  /// [`RefGuard`] explicitly over any non-`static lifetime such as 'async_trait to allow more
+  /// [`RefGuard`] explicitly over any non-`'static` lifetime such as `'async_trait` to allow more
   /// flexible usage combined with async traits
   ///
   /// 5) only use [`std::thread::scope`] with validly created [`LocalRef`]
@@ -204,10 +204,10 @@ where
   /// The well-known way of safely accomplishing these guarantees is to:
   ///
   /// 1) ensure that [`RefGuard`] can only refer to a thread local within the context of the async
-  /// runtime by creating within an async context such as [`tokio::spawn`],
+  /// runtime by creating within an async context such as [`tokio::spawn`](https://docs.rs/tokio/latest/tokio/fn.spawn.html),
   /// [`std::future::Future::poll`], or an async fn
   ///
-  /// 2) explicitly constrain the lifetime to any non-'static lifetime such as `async_trait
+  /// 2) explicitly constrain the lifetime to any non-`'static` lifetime such as `'async_trait`
   unsafe fn guarded_ref<'a>(&'static self) -> RefGuard<'a, Ref>;
 
   async fn with_async<F, R, Fut>(&'static self, f: F) -> R
@@ -285,14 +285,14 @@ mod tests {
     #[async_t::async_trait]
     impl Countable for Counter {
       // Within this context, RefGuard cannot be moved into a blocking thread because of the
-      // 'async_trait lifetime
+      // `'async_trait` lifetime
       async fn add_one(counter: RefGuard<'async_trait, AtomicUsize>) -> usize {
         yield_now().await;
         counter.deref().fetch_add(1, Ordering::Release)
       }
     }
 
-    // here outside of add_one the caller can arbitrarily make this of a 'static lifetime and hence
+    // here outside of add_one the caller can arbitrarily make this of a `'static` lifetime and hence
     // caution is needed
     let counter = unsafe { COUNTER.guarded_ref() };
 
