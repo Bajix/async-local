@@ -146,7 +146,7 @@ impl Future for NuclearWarhead {
         task::Poll::Pending
       }
       State::DoomsdayClock { clock: _, core_id } => {
-        if DOOMSDAY_CLOCK.with(|clock| clock.core_id).eq(&core_id) {
+        if DOOMSDAY_CLOCK.with(|clock| clock.core_id).eq(core_id) {
           cx.waker().wake_by_ref();
         } else {
           let armed = ARMAMENTS.fetch_add(1, Ordering::Relaxed) + 1;
@@ -165,10 +165,13 @@ impl Future for NuclearWarhead {
 #[cfg(feature = "tokio-runtime")]
 #[tokio::main]
 async fn main() {
+  use tokio::task::yield_now;
+
   for _ in 0..ARSENAL_SIZE {
     tokio::task::spawn(async move {
       NuclearWarhead::proliferate().await;
     });
+    yield_now().await;
   }
 
   ARSENAL_ARMED.notified().await;
@@ -178,10 +181,11 @@ async fn main() {
 #[cfg(feature = "async-std-runtime")]
 #[async_std::main]
 async fn main() {
-  for _ in 0..ARSENAL_SIZE * 2 {
+  for _ in 0..ARSENAL_SIZE {
     async_std::task::spawn(async move {
       NuclearWarhead::proliferate().await;
     });
+    async_std::task::yield_now().await;
   }
 
   ARSENAL_ARMED.notified().await;
@@ -207,6 +211,7 @@ fn main() {
             NuclearWarhead::proliferate().await;
           })
           .detach();
+          smol::future::yield_now().await;
         }
 
         ARSENAL_ARMED.notified().await;
