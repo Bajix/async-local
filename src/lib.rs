@@ -2,11 +2,74 @@
 #![cfg_attr(test, feature(exit_status_error))]
 
 #[cfg(not(loom))]
-use std::thread::LocalKey;
+use std::{
+  cell::Cell, sync::atomic::AtomicUsize, sync::atomic::Ordering, sync::Condvar, sync::Mutex,
+  thread::LocalKey,
+};
+#[cfg(loom)]
+use std::{
+  cell::Cell, sync::atomic::AtomicUsize, sync::atomic::Ordering, sync::Condvar, sync::Mutex,
+  thread::LocalKey,
+};
 use std::{future::Future, marker::PhantomData, ops::Deref, ptr::addr_of};
 
-#[cfg(loom)]
-use loom::thread::LocalKey;
+struct ShutdownBarrier {
+  runtime_worker_count: AtomicUsize,
+  runtime_shutdown: Mutex<bool>,
+  cvar: Condvar,
+}
+
+static BARRIER: ShutdownBarrier = ShutdownBarrier {
+  runtime_worker_count: AtomicUsize::new(0),
+  runtime_shutdown: Mutex::new(false),
+  cvar: Condvar::new(),
+};
+
+struct ContextGuard {
+  sync_on_drop: Cell<bool>,
+}
+
+thread_local! {
+  static CONTEXT_GUARD: ContextGuard = ContextGuard { sync_on_drop: Cell::new(false) };
+}
+
+impl ContextGuard {
+  fn enable_shutdown_synchronization() {
+    CONTEXT_GUARD
+      .try_with(|guard| {
+        if guard.sync_on_drop.get().eq(&false) {
+          BARRIER.runtime_worker_count.fetch_add(1, Ordering::Release);
+          guard.sync_on_drop.set(true);
+        }
+      })
+      .ok();
+  }
+
+  fn sync_shutdown(&self) {
+    if self.sync_on_drop.get().eq(&true) {
+      self.sync_on_drop.set(false);
+      if BARRIER
+        .runtime_worker_count
+        .fetch_sub(1, Ordering::AcqRel)
+        .eq(&1)
+      {
+        *BARRIER.runtime_shutdown.lock().unwrap() = true;
+        BARRIER.cvar.notify_all();
+      } else {
+        let mut runtime_shutdown = BARRIER.runtime_shutdown.lock().unwrap();
+        while !*runtime_shutdown {
+          runtime_shutdown = BARRIER.cvar.wait(runtime_shutdown).unwrap();
+        }
+      }
+    }
+  }
+}
+
+impl Drop for ContextGuard {
+  fn drop(&mut self) {
+    self.sync_shutdown();
+  }
+}
 
 /// A wrapper around a thread-safe inner type used for creating pointers to thread-locals
 /// that are valid for the lifetime of the async runtime and usable within an async context across
@@ -57,6 +120,16 @@ where
     &self.0
   }
 }
+
+impl<T> Drop for Context<T>
+where
+  T: Sync,
+{
+  fn drop(&mut self) {
+    CONTEXT_GUARD.try_with(ContextGuard::sync_shutdown).ok();
+  }
+}
+
 /// A thread-safe pointer to a thread local [`Context`]
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct LocalRef<T: Sync + 'static>(*const Context<T>);
@@ -66,6 +139,8 @@ where
   T: Sync + 'static,
 {
   unsafe fn new(context: &Context<T>) -> Self {
+    ContextGuard::enable_shutdown_synchronization();
+
     LocalRef(addr_of!(*context))
   }
 
@@ -118,6 +193,8 @@ where
   T: Sync + 'static,
 {
   unsafe fn new(context: &Context<T>) -> Self {
+    ContextGuard::enable_shutdown_synchronization();
+
     RefGuard {
       inner: addr_of!(*context),
       _marker: PhantomData,
@@ -152,10 +229,7 @@ impl<'a, T> Copy for RefGuard<'a, T> where T: Sync + 'static {}
 unsafe impl<'a, T> Send for RefGuard<'a, T> where T: Sync {}
 unsafe impl<'a, T> Sync for RefGuard<'a, T> where T: Sync {}
 
-/// LocalKey extension for creating stable thread-safe pointers to thread-local [`Context`]s that
-/// are valid for the lifetime of the async runtime and usable within an async context across await
-/// points
-
+/// LocalKey extension for creating thread-safe pointers to thread-local [`Context`]
 #[async_t::async_trait]
 pub trait AsyncLocal<T, Ref>
 where
@@ -167,7 +241,7 @@ where
   /// # Safety
   ///
   /// The **only** safe way to use [`LocalRef`] is as created from and used within the context of
-  /// the async runtime or a thread scoped therein. All behavior must ensure that it is not possible
+  /// an async runtime or a thread scoped therein. All behavior must ensure that it is not possible
   /// for [`LocalRef`] to be created within nor dereferenced on a thread outside of the async
   /// runtime.
   ///
@@ -210,6 +284,7 @@ where
   /// 2) explicitly constrain the lifetime to any non-`'static` lifetime such as `'async_trait`
   unsafe fn guarded_ref<'a>(&'static self) -> RefGuard<'a, Ref>;
 
+  /// The async counterpart of [LocalKey::with](https://doc.rust-lang.org/std/thread/struct.LocalKey.html#method.with)
   async fn with_async<F, R, Fut>(&'static self, f: F) -> R
   where
     F: FnOnce(RefGuard<'async_trait, Ref>) -> Fut + Send,
@@ -292,8 +367,8 @@ mod tests {
       }
     }
 
-    // here outside of add_one the caller can arbitrarily make this of a `'static` lifetime and hence
-    // caution is needed
+    // here outside of add_one the caller can arbitrarily make this of a `'static` lifetime and
+    // hence caution is needed
     let counter = unsafe { COUNTER.guarded_ref() };
 
     Counter::add_one(counter).await;

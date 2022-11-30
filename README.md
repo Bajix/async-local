@@ -5,23 +5,17 @@
 
 ## Thread-safe pointers to thread-locals are possible within an async context
 
-Traditionally the downside of thread-locals has been that usage is constrained to the [LocalKey::with](https://doc.rust-lang.org/std/thread/struct.LocalKey.html#method.with) closure with no lifetime escapement thus making usage within an async context limited to calls between await points with no guarantee of reference stability. This makes a lot of sense for a number of reasons: there is no clear way to express the lifetime of a thread, there lifetime's of threads are **never** equivalent and extending the lifetime to `'static` can result in dangling pointers during shutdown should references outlive the referenced thread local. Despite all these constraints however, it is yet possible to safely hold pointers to thread locals beyond the standard lifetime of thread locals and across await points by logically constraining usage to exclusively be within an async context. This crate provides safe abstractions such as [AsyncLocal::with_async](https://docs.rs/async-local/latest/async_local/trait.AsyncLocal.html#tymethod.with_async) as well as the unsafe pointer types and safety considerations for creating narrowly-tailored safe abstractions for using pointers to thread locals soundly in an async context and across await points.
+Traditionally the downside of thread-locals has been that usage is constrained to the [LocalKey::with](https://doc.rust-lang.org/std/thread/struct.LocalKey.html#method.with) closure with no lifetime escapement thus preventing immutable references and limiting usability in async context. This makes a lot of sense: the lifetime of unscoped threads is indeterminate, and references may dangle should threads outlive what they reference. There is however an escape hatch to these limitations: by utilizing a synchronization barrier across all runtime worker threads as a guard to protect the destruction of thread local data, runtime shutdowns can be sequenced in a way that guarantees no task be dropped after this barrier, and in doing so it can be ensured that so long as the [pin drop guarantee](https://doc.rust-lang.org/std/pin/index.html#drop-guarantee) is upheld, pointers to thread local data created within an async context and held therein will never dangle. This crate provides safe abstractions such as [AsyncLocal::with_async](https://docs.rs/async-local/latest/async_local/trait.AsyncLocal.html#tymethod.with_async), the async counterpart of [LocalKey::with](https://doc.rust-lang.org/std/thread/struct.LocalKey.html#method.with), as well as the unsafe pointer types and safety considerations for creating narrowly-tailored safe abstractions for using pointers to thread locals soundly in an async context and across await points.
 
 ## Runtime Safety
 
-Exclusively during the async runtime shutdown sequence there exists potential for [LocalRef](https://docs.rs/async-local/latest/async_local/struct.LocalRef.html) and [RefGuard](https://docs.rs/async-local/latest/async_local/struct.RefGuard.html) to dereference dangling pointers while dropping unless the runtime itself sequences shutdown in a way that prevents this as described below. This can be avoided by never dereferencing these pointers during drop, or by using a supported runtime such as Tokio or async-std. All single-threaded runtimes are inherently safe to use.
+The only requirement for async runtimes to be compatible with [async-local](https://crates.io/crates/async-local) is that pending async tasks aren't dropped by thread local destructors. The Tokio runtime ensures this by [sequencing shutdowns](https://github.com/tokio-rs/tokio/blob/b2f5dbea4703be0c97150b91d3b2c46f29f1a0bf/tokio/src/runtime/runtime.rs#L27-L32).
 
-| Runtime      | Shutdown drop safety   | Shutdown Behavior             |
-| ------------ | ---------------------- | ----------------------------- |
-| Tokio        | Safe; no dangling refs | Drops safely sequenced        |
-| async-std    | Safe; no dangling refs | Safe; tasks are not dropped   |
-| smol         | Unsafe; deref unsound  | Unsequenced; refs may dangle  |
-
-The Tokio runtime [sequences shutdowns](https://github.com/tokio-rs/tokio/blob/b2f5dbea4703be0c97150b91d3b2c46f29f1a0bf/tokio/src/runtime/runtime.rs#L27-L32) such that worker threads will block until the shutdown operation is completed. This ensures that all tasks will be dropped before any worker thread is dropped, and by virtue of this pointers to TLS variables upholding the pin drop guarantee and held within an async context are valid for all lifetimes except `'static` without risk of dangling pointers.
-
-The [async-std](https://crates.io/crates/async-std) runtime doesn't drop pending tasks when shutting down and hence avoids the possibility of dangling references occuring during drop altogether.
-
-The [smol](https://crates.io/crates/smol) runtime should not be used in conjunction with [async-local](https://crates.io/crates/async-local) because pointers may dangle during drop when shutting down the runtime and cause undefined behavior.
+| Runtime   | Support       | Shutdown Behavior                      |
+| --------- | ------------- | -------------------------------------- |
+| Tokio     | Supported     | Tasks dropped during shutdown sequence |
+| async-std | Supported     | Tasks forgotten                        |
+| smol      | Not Supported | Tasks dropped by TLS destructors       |
 
 See [doomsday-clock](https://crates.io/crates/doomsday-clock) for runtime shutdown safety tests.
 
