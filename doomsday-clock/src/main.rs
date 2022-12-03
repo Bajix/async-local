@@ -53,7 +53,7 @@ impl DoomsdayClock {
     DoomsdayClock {
       core_id,
       armed: Cell::new(0),
-      disarmed: unsafe { Context::new(AtomicUsize::new(0)) },
+      disarmed: Context::new(AtomicUsize::new(0)),
     }
   }
 }
