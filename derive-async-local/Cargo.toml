@@ -1,0 +1,19 @@
+[package]
+name = "derive-async-local"
+authors = ["Thomas Sieverding <Thomas@bajix.com>"]
+edition = "2021"
+version = "0.4.0"
+description = "Derives for async-local"
+readme = "./README.md"
+license = "MIT"
+repository = "https://github.com/Bajix/async-local/"
+
+[lib]
+test = false
+doctest = false
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "1", features = ["derive"] }

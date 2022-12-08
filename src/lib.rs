@@ -1,6 +1,8 @@
 #![cfg_attr(not(feature = "boxed"), feature(type_alias_impl_trait))]
 #![cfg_attr(test, feature(exit_status_error))]
 
+extern crate self as async_local;
+
 #[cfg(not(loom))]
 use std::{
   cell::Cell, sync::atomic::AtomicUsize, sync::atomic::Ordering, sync::Condvar, sync::Mutex,
@@ -12,6 +14,8 @@ use std::{
   thread::LocalKey,
 };
 use std::{future::Future, marker::PhantomData, ops::Deref, ptr::addr_of};
+
+pub use derive_async_local::AsContext;
 
 struct ShutdownBarrier {
   runtime_worker_count: AtomicUsize,
@@ -82,7 +86,7 @@ where
   ///
   /// # Usage
   ///
-  /// Either wrap an inner type with Context and assign to a thread-local, or use as an unwrapped field in a struct that implements [AsRef](https://doc.rust-lang.org/std/convert/trait.AsRef.html)<[`Context<T>`]>
+  /// Either wrap an inner type with Context and assign to a thread-local, or use as an unwrapped field in a struct that derives [AsContext]
   ///
   /// # Example
   ///
@@ -123,6 +127,19 @@ where
     CONTEXT_GUARD.try_with(ContextGuard::sync_shutdown).ok();
   }
 }
+
+/// A marker trait promising [AsRef](https://doc.rust-lang.org/std/convert/trait.AsRef.html)<[`Context<T>`]> is safely implemented
+///
+/// # Safety
+///
+/// When assigned to a thread local, the [pin drop guarantee](https://doc.rust-lang.org/std/pin/index.html#drop-guarantee) must be upheld for [`Context<T>`]: it cannot be wrapped in a pointer type nor cell type and it must not be invalidated nor repurposed until when [drop](https://doc.rust-lang.org/std/ops/trait.Drop.html#tymethod.drop) happens as a consequence of the thread dropping.
+pub unsafe trait AsContext<T>: AsRef<Context<T>>
+where
+  T: Sync,
+{
+}
+
+unsafe impl<T> AsContext<T> for Context<T> where T: Sync {}
 
 /// A thread-safe pointer to a thread local [`Context`]
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -225,7 +242,7 @@ unsafe impl<'a, T> Sync for RefGuard<'a, T> where T: Sync {}
 #[async_t::async_trait]
 pub trait AsyncLocal<T, Ref>
 where
-  T: 'static + AsRef<Context<Ref>>,
+  T: 'static + AsContext<Ref>,
   Ref: Sync + 'static,
 {
   /// The async counterpart of [LocalKey::with](https://doc.rust-lang.org/std/thread/struct.LocalKey.html#method.with)
@@ -238,7 +255,7 @@ where
   ///
   /// # Safety
   ///
-  /// The **only** safe way to use [`LocalRef`] is within the context of an async runtime and with a [`Context`] that upholds the [pin drop guarantee](https://doc.rust-lang.org/std/pin/index.html#drop-guarantee): it cannot be wrapped in a pointer type nor cell type and it must not be invalidated nor repurposed until when [drop](https://doc.rust-lang.org/std/ops/trait.Drop.html#tymethod.drop) happens as a consequence of the thread dropping.
+  /// The **only** safe way to use [`LocalRef`] is within the context of an async runtime
   ///
   /// The well-known way of safely accomplishing these guarantees is to:
   ///
@@ -257,7 +274,7 @@ where
   ///
   /// # Safety
   ///
-  /// The **only** safe way to use [`RefGuard`] is within the context of an async runtime and with a [`Context`] that upholds the [pin drop guarantee](https://doc.rust-lang.org/std/pin/index.html#drop-guarantee): it cannot be wrapped in a pointer type nor cell type and it must not be invalidated nor repurposed until when [drop](https://doc.rust-lang.org/std/ops/trait.Drop.html#tymethod.drop) happens as a consequence of the thread dropping.
+  /// The **only** safe way to use [`RefGuard`] is within the context of an async runtime
   ///
   /// The well-known way of safely accomplishing these guarantees is to:
   ///
@@ -270,7 +287,7 @@ where
 #[async_t::async_trait]
 impl<T, Ref> AsyncLocal<T, Ref> for LocalKey<T>
 where
-  T: 'static + AsRef<Context<Ref>>,
+  T: 'static + AsContext<Ref>,
   Ref: Sync + 'static,
 {
   async fn with_async<F, R, Fut>(&'static self, f: F) -> R

@@ -22,7 +22,7 @@ use std::{
   task,
 };
 
-use async_local::{AsyncLocal, Context, LocalRef};
+use async_local::{AsContext, AsyncLocal, Context, LocalRef};
 use pin_project::{pin_project, pinned_drop};
 use static_assertions::assert_cfg;
 use tokio::sync::Notify;
@@ -34,16 +34,12 @@ static CORE_ID: AtomicUsize = AtomicUsize::new(0);
 static ARSENAL_ARMED: Notify = Notify::const_new();
 static ARMAMENTS: AtomicUsize = AtomicUsize::new(0);
 static CLOCK_DROPPED: AtomicBool = AtomicBool::new(false);
+
+#[derive(AsContext)]
 pub struct DoomsdayClock {
   core_id: usize,
   armed: Cell<usize>,
   disarmed: Context<AtomicUsize>,
-}
-
-impl AsRef<Context<AtomicUsize>> for DoomsdayClock {
-  fn as_ref(&self) -> &Context<AtomicUsize> {
-    &self.disarmed
-  }
 }
 
 impl DoomsdayClock {
