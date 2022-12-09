@@ -23,7 +23,7 @@ fn is_context(type_path: &TypePath) -> bool {
   )
 }
 
-/// Derive [AsRef](https://doc.rust-lang.org/std/convert/trait.AsRef.html)<[`Context<T>`](https://docs.rs/async-local/latest/async_local/trait.Context.html)> and [AsContext](https://docs.rs/async-local/latest/async_local/trait.AsContext.html) for struct
+/// Derive [AsRef](https://doc.rust-lang.org/std/convert/trait.AsRef.html)<[`Context<T>`](https://docs.rs/async-local/latest/async_local/struct.Context.html)> and [AsContext](https://docs.rs/async-local/latest/async_local/trait.AsContext.html) for a struct
 #[proc_macro_derive(AsContext)]
 pub fn derive_as_context(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
   let input = parse_macro_input!(input as DeriveInput);
@@ -69,9 +69,7 @@ pub fn derive_as_context(input: proc_macro::TokenStream) -> proc_macro::TokenStr
       if let Some(segment) = type_path.path.segments.last() {
         if let PathArguments::AngleBracketed(inner) = &segment.arguments {
           if let Some(GenericArgument::Type(Type::Path(type_path))) = inner.args.first() {
-            if is_context(type_path) {
-              return true;
-            }
+            return is_context(type_path);
           }
         }
       }

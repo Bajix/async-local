@@ -75,7 +75,7 @@ impl Drop for ContextGuard {
   }
 }
 
-/// A wrapper around a thread-safe inner type used for creating pointers to thread-locals that are valid within an async context
+/// A wrapper type used for creating pointers to thread-locals that are valid within an async context
 pub struct Context<T: Sync>(T);
 
 impl<T> Context<T>
@@ -86,13 +86,17 @@ where
   ///
   /// # Usage
   ///
-  /// Either wrap an inner type with Context and assign to a thread-local, or use as an unwrapped field in a struct that derives [AsContext]
+  /// Either wrap a type with Context and assign to a thread-local, or use as an unwrapped field in a struct that derives [AsContext]
   ///
   /// # Example
   ///
   /// ```rust
+  /// use std::sync::atomic::AtomicUsize;
+  ///
+  /// use async_local::Context;
+  ///
   /// thread_local! {
-  ///   static COUNTER: Context<AtomicUsize> = Context::new(|| AtomicUsize::new(0));
+  ///   static COUNTER: Context<AtomicUsize> = Context::new(AtomicUsize::new(0));
   /// }
   /// ```
   pub fn new(inner: T) -> Context<T> {
@@ -128,7 +132,7 @@ where
   }
 }
 
-/// A marker trait promising [AsRef](https://doc.rust-lang.org/std/convert/trait.AsRef.html)<[`Context<T>`]> is safely implemented
+/// A marker trait promising [AsRef](https://doc.rust-lang.org/std/convert/trait.AsRef.html)<[`Context<T>`]> is implemented in a way that can't be invalidated
 ///
 /// # Safety
 ///
@@ -280,7 +284,7 @@ where
   ///
   /// 1) ensure that [`RefGuard`] can only refer to a thread local within the context of the async runtime by creating within an async context such as [`tokio::spawn`](https://docs.rs/tokio/latest/tokio/fn.spawn.html), [`std::future::Future::poll`], or an async fn or block or within the drop of a pinned [`std::future::Future`] that created [`RefGuard`] prior while pinned and polling.
   ///
-  /// 2) explicitly constrain the lifetime to any non-`'static` lifetime such as`'async_trait`
+  /// 2) Use borrows of any non-`'static` lifetime such as`'async_trait` as a way of constraining the lifetime and preventing [`RefGuard`] from being movable into a blocking thread.
   unsafe fn guarded_ref<'a>(&'static self) -> RefGuard<'a, Ref>;
 }
 
