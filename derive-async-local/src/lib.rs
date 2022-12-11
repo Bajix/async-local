@@ -91,38 +91,47 @@ pub fn derive_as_context(input: proc_macro::TokenStream) -> proc_macro::TokenStr
     .collect();
 
   if context_paths.len().eq(&0) {
-    return Error::new(Span::call_site(), "struct must use async_local::Context")
+    return Error::new(Span::call_site(), "struct must use Context exactly once")
       .into_compile_error()
       .into();
   }
 
-  let expanded = context_paths.into_iter().map(|(field, type_path)| {
-    let context_ident = &field.ident;
+  if context_paths.len().gt(&1) {
+    return context_paths
+      .into_iter()
+      .map(|(_, type_path)| Error::new_spanned(type_path, "Context cannot be used more than once"))
+      .reduce(|mut err, other| {
+        err.combine(other);
+        err
+      })
+      .unwrap()
+      .into_compile_error()
+      .into();
+  }
 
-    let ref_type = type_path.path.segments.last().and_then(|segment| {
-      if let PathArguments::AngleBracketed(ref_type) = &segment.arguments {
-        Some(&ref_type.args)
-      } else {
-          None
-      }
-    });
+  let (field, type_path) = context_paths.into_iter().next().unwrap();
 
-    quote!(
-      impl #impl_generics AsRef<#type_path> for #ident #ty_generics #where_clause {
-        fn as_ref(&self) -> &#type_path {
-          &self.#context_ident
-        }
-      }
+  let context_ident = &field.ident;
 
-      unsafe impl #impl_generics async_local::AsContext<#ref_type> for #ident #ty_generics #where_clause {}
-    )
-  }).fold(quote!{}, | expanded, trait_impl | {
-    quote!(
-      #expanded
-
-      #trait_impl
-    )
+  let ref_type = type_path.path.segments.last().and_then(|segment| {
+    if let PathArguments::AngleBracketed(ref_type) = &segment.arguments {
+      Some(&ref_type.args)
+    } else {
+      None
+    }
   });
+
+  let expanded = quote!(
+    impl #impl_generics AsRef<#type_path> for #ident #ty_generics #where_clause {
+      fn as_ref(&self) -> &#type_path {
+        &self.#context_ident
+      }
+    }
+
+    unsafe impl #impl_generics async_local::AsContext for #ident #ty_generics #where_clause {
+      type Target = #ref_type;
+    }
+  );
 
   expanded.into()
 }

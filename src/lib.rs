@@ -137,13 +137,16 @@ where
 /// # Safety
 ///
 /// When assigned to a thread local, the [pin drop guarantee](https://doc.rust-lang.org/std/pin/index.html#drop-guarantee) must be upheld for [`Context<T>`]: it cannot be wrapped in a pointer type nor cell type and it must not be invalidated nor repurposed until when [drop](https://doc.rust-lang.org/std/ops/trait.Drop.html#tymethod.drop) happens as a consequence of the thread dropping.
-pub unsafe trait AsContext<T>: AsRef<Context<T>>
+pub unsafe trait AsContext: AsRef<Context<Self::Target>> {
+  type Target: Sync;
+}
+
+unsafe impl<T> AsContext for Context<T>
 where
   T: Sync,
 {
+  type Target = T;
 }
-
-unsafe impl<T> AsContext<T> for Context<T> where T: Sync {}
 
 /// A thread-safe pointer to a thread local [`Context`]
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -244,15 +247,14 @@ unsafe impl<'a, T> Sync for RefGuard<'a, T> where T: Sync {}
 
 /// LocalKey extension for creating thread-safe pointers to thread-local [`Context`]
 #[async_t::async_trait]
-pub trait AsyncLocal<T, Ref>
+pub trait AsyncLocal<T>
 where
-  T: 'static + AsContext<Ref>,
-  Ref: Sync + 'static,
+  T: 'static + AsContext,
 {
   /// The async counterpart of [LocalKey::with](https://doc.rust-lang.org/std/thread/struct.LocalKey.html#method.with)
   async fn with_async<F, R, Fut>(&'static self, f: F) -> R
   where
-    F: FnOnce(RefGuard<'async_trait, Ref>) -> Fut + Send,
+    F: FnOnce(RefGuard<'async_trait, T::Target>) -> Fut + Send,
     Fut: Future<Output = R> + Send;
 
   /// Create a thread-safe pointer to a thread local [`Context`]
@@ -272,7 +274,7 @@ where
   /// 4) ensure that a move into [`std::thread`] cannot occur or otherwise that [`LocalRef`] cannot be created nor derefenced outside of an async context by constraining use exclusively to within a pinned [`std::future::Future`] being polled or dropped and otherwise using [`RefGuard`] explicitly over any non-`'static` lifetime such as `'async_trait` to allow more flexible usage combined with async traits
   ///
   /// 5) only use [`std::thread::scope`] with validly created [`LocalRef`]
-  unsafe fn local_ref(&'static self) -> LocalRef<Ref>;
+  unsafe fn local_ref(&'static self) -> LocalRef<T::Target>;
 
   /// Create a lifetime-constrained thread-safe pointer to a thread local [`Context`]
   ///
@@ -285,18 +287,17 @@ where
   /// 1) ensure that [`RefGuard`] can only refer to a thread local within the context of the async runtime by creating within an async context such as [`tokio::spawn`](https://docs.rs/tokio/latest/tokio/fn.spawn.html), [`std::future::Future::poll`], or an async fn or block or within the drop of a pinned [`std::future::Future`] that created [`RefGuard`] prior while pinned and polling.
   ///
   /// 2) Use borrows of any non-`'static` lifetime such as`'async_trait` as a way of constraining the lifetime and preventing [`RefGuard`] from being movable into a blocking thread.
-  unsafe fn guarded_ref<'a>(&'static self) -> RefGuard<'a, Ref>;
+  unsafe fn guarded_ref<'a>(&'static self) -> RefGuard<'a, T::Target>;
 }
 
 #[async_t::async_trait]
-impl<T, Ref> AsyncLocal<T, Ref> for LocalKey<T>
+impl<T> AsyncLocal<T> for LocalKey<T>
 where
-  T: 'static + AsContext<Ref>,
-  Ref: Sync + 'static,
+  T: AsContext,
 {
   async fn with_async<F, R, Fut>(&'static self, f: F) -> R
   where
-    F: FnOnce(RefGuard<'async_trait, Ref>) -> Fut + Send,
+    F: FnOnce(RefGuard<'async_trait, T::Target>) -> Fut + Send,
     Fut: Future<Output = R> + Send,
   {
     let local_ref = unsafe { self.guarded_ref() };
@@ -304,11 +305,11 @@ where
     f(local_ref).await
   }
 
-  unsafe fn local_ref(&'static self) -> LocalRef<Ref> {
+  unsafe fn local_ref(&'static self) -> LocalRef<T::Target> {
     self.with(|value| LocalRef::new(value.as_ref()))
   }
 
-  unsafe fn guarded_ref<'a>(&'static self) -> RefGuard<'a, Ref> {
+  unsafe fn guarded_ref<'a>(&'static self) -> RefGuard<'a, T::Target> {
     self.with(|value| RefGuard::new(value.as_ref()))
   }
 }
