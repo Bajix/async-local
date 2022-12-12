@@ -4,76 +4,13 @@
 extern crate self as async_local;
 
 #[cfg(not(loom))]
-use std::{
-  cell::Cell, sync::atomic::AtomicUsize, sync::atomic::Ordering, sync::Condvar, sync::Mutex,
-  thread::LocalKey,
-};
+use std::thread::LocalKey;
 #[cfg(loom)]
-use std::{
-  cell::Cell, sync::atomic::AtomicUsize, sync::atomic::Ordering, sync::Condvar, sync::Mutex,
-  thread::LocalKey,
-};
+use std::thread::LocalKey;
 use std::{future::Future, marker::PhantomData, ops::Deref, ptr::addr_of};
 
 pub use derive_async_local::AsContext;
-
-struct ShutdownBarrier {
-  runtime_worker_count: AtomicUsize,
-  runtime_shutdown: Mutex<bool>,
-  cvar: Condvar,
-}
-
-static BARRIER: ShutdownBarrier = ShutdownBarrier {
-  runtime_worker_count: AtomicUsize::new(0),
-  runtime_shutdown: Mutex::new(false),
-  cvar: Condvar::new(),
-};
-
-struct ContextGuard {
-  sync_on_drop: Cell<bool>,
-}
-
-thread_local! {
-  static CONTEXT_GUARD: ContextGuard = ContextGuard { sync_on_drop: Cell::new(false) };
-}
-
-impl ContextGuard {
-  fn enable_shutdown_synchronization() {
-    CONTEXT_GUARD
-      .try_with(|guard| {
-        if guard.sync_on_drop.get().eq(&false) {
-          BARRIER.runtime_worker_count.fetch_add(1, Ordering::Release);
-          guard.sync_on_drop.set(true);
-        }
-      })
-      .ok();
-  }
-
-  fn sync_shutdown(&self) {
-    if self.sync_on_drop.get().eq(&true) {
-      self.sync_on_drop.set(false);
-      if BARRIER
-        .runtime_worker_count
-        .fetch_sub(1, Ordering::AcqRel)
-        .eq(&1)
-      {
-        *BARRIER.runtime_shutdown.lock().unwrap() = true;
-        BARRIER.cvar.notify_all();
-      } else {
-        let mut runtime_shutdown = BARRIER.runtime_shutdown.lock().unwrap();
-        while !*runtime_shutdown {
-          runtime_shutdown = BARRIER.cvar.wait(runtime_shutdown).unwrap();
-        }
-      }
-    }
-  }
-}
-
-impl Drop for ContextGuard {
-  fn drop(&mut self) {
-    self.sync_shutdown();
-  }
-}
+use shutdown_barrier::{guard_thread_shutdown, suspend_until_shutdown};
 
 /// A wrapper type used for creating pointers to thread-locals that are valid within an async context
 pub struct Context<T: Sync>(T);
@@ -128,7 +65,7 @@ where
   T: Sync,
 {
   fn drop(&mut self) {
-    CONTEXT_GUARD.try_with(ContextGuard::sync_shutdown).ok();
+    suspend_until_shutdown();
   }
 }
 
@@ -157,7 +94,7 @@ where
   T: Sync + 'static,
 {
   unsafe fn new(context: &Context<T>) -> Self {
-    ContextGuard::enable_shutdown_synchronization();
+    guard_thread_shutdown();
 
     LocalRef(addr_of!(*context))
   }
@@ -209,7 +146,7 @@ where
   T: Sync + 'static,
 {
   unsafe fn new(context: &Context<T>) -> Self {
-    ContextGuard::enable_shutdown_synchronization();
+    guard_thread_shutdown();
 
     RefGuard {
       inner: addr_of!(*context),
