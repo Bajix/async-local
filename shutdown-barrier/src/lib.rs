@@ -62,14 +62,34 @@ thread_local! {
   static SHUTDOWN_GUARD: ShutdownGuard = Default::default();
 }
 
-/// Guard current thread's local data destruction until guarded threads rendezvous
+/// Guard current thread's local data destruction until guarded threads rendezvous during shutdown.
 pub fn guard_thread_shutdown() {
   SHUTDOWN_GUARD
     .try_with(ShutdownGuard::guard_thread_shutdown)
     .ok();
 }
 
-/// Suspend the current thread until all guarded threads rendesvous during shutdown. A thread will only be suspended at most once this way
+/// Suspend the current thread until all guarded threads rendezvous during shutdown. A thread will be suspended at most once this way this way and only if previously guarded.
+///
+/// # Example
+///
+/// ```rust
+/// pub struct Context<T: Sync>(T);
+///
+/// impl<T> Drop for Context<T>
+/// where
+///   T: Sync,
+/// {
+///   fn drop(&mut self) {
+///     // By blocking here we ensure T cannot be deallocated until all guarded threads rendezvous while destroying thread local data
+///     suspend_until_shutdown();
+///   }
+/// }
+///
+/// thread_local! {
+///   static COUNTER: Context<AtomicUsize> = Context::new(AtomicUsize::new(0));
+/// }
+/// ```
 pub fn suspend_until_shutdown() {
   SHUTDOWN_GUARD.try_with(ShutdownGuard::rendezvous).ok();
 }
