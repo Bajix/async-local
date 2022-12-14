@@ -1,51 +1,58 @@
 #[cfg(not(loom))]
 use std::{
-  cell::Cell, sync::atomic::AtomicUsize, sync::atomic::Ordering, sync::Condvar, sync::Mutex,
+  cell::RefCell, sync::atomic::AtomicUsize, sync::atomic::Ordering, sync::Condvar, sync::Mutex,
 };
 #[cfg(loom)]
 use std::{
-  cell::Cell, sync::atomic::AtomicUsize, sync::atomic::Ordering, sync::Condvar, sync::Mutex,
+  cell::RefCell, sync::atomic::AtomicUsize, sync::atomic::Ordering, sync::Condvar, sync::Mutex,
 };
 
 struct ShutdownBarrier {
-  runtime_worker_count: AtomicUsize,
-  runtime_shutdown: Mutex<bool>,
+  guard_count: AtomicUsize,
+  shutdown_finalized: Mutex<bool>,
   cvar: Condvar,
 }
 
 static BARRIER: ShutdownBarrier = ShutdownBarrier {
-  runtime_worker_count: AtomicUsize::new(0),
-  runtime_shutdown: Mutex::new(false),
+  guard_count: AtomicUsize::new(0),
+  shutdown_finalized: Mutex::new(false),
   cvar: Condvar::new(),
 };
 
-#[derive(Default)]
-struct ShutdownGuard {
-  suspend_shutdown: Cell<bool>,
+#[derive(PartialEq, Eq)]
+enum Guard {
+  Thread,
+  Runtime,
 }
+#[derive(Default)]
+struct ShutdownGuard(RefCell<Option<Guard>>);
 
 impl ShutdownGuard {
   fn guard_thread_shutdown(&self) {
-    if self.suspend_shutdown.get().eq(&false) {
-      BARRIER.runtime_worker_count.fetch_add(1, Ordering::Release);
-      self.suspend_shutdown.set(true);
+    if self.0.borrow().eq(&None) {
+      BARRIER.guard_count.fetch_add(1, Ordering::Release);
+      *self.0.borrow_mut() = Some(Guard::Thread);
+    }
+  }
+
+  fn defer_shutdown(&self) {
+    if self.0.borrow().eq(&None) {
+      BARRIER.guard_count.fetch_add(1, Ordering::Release);
+      *self.0.borrow_mut() = Some(Guard::Runtime);
     }
   }
 
   fn rendezvous(&self) {
-    if self.suspend_shutdown.get().eq(&true) {
-      self.suspend_shutdown.set(false);
-      if BARRIER
-        .runtime_worker_count
-        .fetch_sub(1, Ordering::AcqRel)
-        .eq(&1)
-      {
-        *BARRIER.runtime_shutdown.lock().unwrap() = true;
+    if self.0.borrow().ne(&None) {
+      let guard_type = self.0.replace(None).unwrap();
+
+      if BARRIER.guard_count.fetch_sub(1, Ordering::AcqRel).eq(&1) {
+        *BARRIER.shutdown_finalized.lock().unwrap() = true;
         BARRIER.cvar.notify_all();
-      } else {
-        let mut runtime_shutdown = BARRIER.runtime_shutdown.lock().unwrap();
-        while !*runtime_shutdown {
-          runtime_shutdown = BARRIER.cvar.wait(runtime_shutdown).unwrap();
+      } else if guard_type.eq(&Guard::Thread) {
+        let mut shutdown_finalized = BARRIER.shutdown_finalized.lock().unwrap();
+        while !*shutdown_finalized {
+          shutdown_finalized = BARRIER.cvar.wait(shutdown_finalized).unwrap();
         }
       }
     }
@@ -69,7 +76,12 @@ pub fn guard_thread_shutdown() {
     .ok();
 }
 
-/// Suspend the current thread until all guarded threads rendezvous during shutdown. A thread will be suspended at most once this way this way and only if previously guarded.
+/// Defer shutdown for the lifetime of the current thread
+pub fn defer_shutdown() {
+  SHUTDOWN_GUARD.try_with(ShutdownGuard::defer_shutdown).ok();
+}
+
+/// Suspend the current thread until all guarded threads rendezvous during shutdown. A thread will be suspended at most once this way and only if previously guarded.
 ///
 /// # Example
 ///
