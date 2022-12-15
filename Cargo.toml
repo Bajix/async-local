@@ -10,8 +10,11 @@ repository = "https://github.com/Bajix/async-local/"
 
 [dependencies]
 async_t = "0.7.0"
+async-std = { version = "1", features = [], optional = true }
 derive-async-local = { version = "0.5.0", path = "./derive-async-local" }
 shutdown-barrier = { version = "0.1.0", path = "./shutdown-barrier" }
+static_assertions = "1.1.0"
+tokio = { version = "1", features = ["rt"], optional = true }
 
 [dev-dependencies]
 doomsday-clock = { path = "./doomsday-clock" }
@@ -25,8 +28,10 @@ doctest = false
 bench = false
 
 [features]
-default = []
+default = ["tokio-runtime"]
 boxed = ["async_t/boxed"]
+tokio-runtime = ["tokio"]
+async-std-runtime = ["async-std"]
 
 [workspace]
 members = ["derive-async-local", "doomsday-clock", "shutdown-barrier"]
