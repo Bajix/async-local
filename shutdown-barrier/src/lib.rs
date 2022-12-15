@@ -1,10 +1,9 @@
-#[cfg(not(loom))]
 use std::{
-  cell::RefCell, sync::atomic::AtomicUsize, sync::atomic::Ordering, sync::Condvar, sync::Mutex,
-};
-#[cfg(loom)]
-use std::{
-  cell::RefCell, sync::atomic::AtomicUsize, sync::atomic::Ordering, sync::Condvar, sync::Mutex,
+  cell::RefCell,
+  sync::{
+    atomic::{AtomicUsize, Ordering},
+    Condvar, Mutex,
+  },
 };
 
 struct ShutdownBarrier {

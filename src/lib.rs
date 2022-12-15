@@ -12,11 +12,7 @@ assert_cfg!(all(
 
 extern crate self as async_local;
 
-#[cfg(not(loom))]
-use std::thread::LocalKey;
-#[cfg(loom)]
-use std::thread::LocalKey;
-use std::{future::Future, marker::PhantomData, ops::Deref, ptr::addr_of};
+use std::{future::Future, marker::PhantomData, ops::Deref, ptr::addr_of, thread::LocalKey};
 
 #[cfg(feature = "async-std-runtime")]
 use async_std::task::{spawn_blocking, JoinError};
@@ -318,7 +314,7 @@ where
   }
 }
 
-#[cfg(all(test, not(loom)))]
+#[cfg(all(test))]
 mod tests {
   use std::{
     io,
