@@ -2,7 +2,7 @@
 name = "shutdown-barrier"
 authors = ["Thomas Sieverding <Thomas@bajix.com>"]
 edition = "2021"
-version = "0.1.0"
+version = "1.0.0"
 description = "Runtime shutdown barrier for synchronizing TLS destructors"
 readme = "./README.md"
 license = "MIT"
