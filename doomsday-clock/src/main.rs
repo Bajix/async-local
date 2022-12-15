@@ -89,10 +89,7 @@ thread_local! {
 #[pin_project]
 enum State {
   Proliferating,
-  DoomsdayClock {
-    clock: LocalRef<AtomicUsize>,
-    core_id: usize,
-  },
+  DoomsdayClock { clock: LocalRef<AtomicUsize> },
 }
 
 #[pin_project(PinnedDrop)]
@@ -115,7 +112,7 @@ impl PinnedDrop for NuclearWarhead {
       panic!("NulcearWarhead dropped after DoomsdayClock: dangling references will occur");
     }
 
-    if let State::DoomsdayClock { clock, core_id: _ } = &self.state {
+    if let State::DoomsdayClock { clock } = &self.state {
       clock.fetch_add(1, Ordering::Release);
     }
   }
@@ -130,26 +127,21 @@ impl Future for NuclearWarhead {
       State::Proliferating => {
         let clock = unsafe { DOOMSDAY_CLOCK.local_ref() };
 
-        let core_id = DOOMSDAY_CLOCK.with(|clock| {
+        DOOMSDAY_CLOCK.with(|clock| {
           clock.armed.update(|n| n + 1);
-          clock.core_id
         });
 
-        let _ = std::mem::replace(this.state, State::DoomsdayClock { clock, core_id });
+        let _ = std::mem::replace(this.state, State::DoomsdayClock { clock });
 
         cx.waker().wake_by_ref();
 
         task::Poll::Pending
       }
-      State::DoomsdayClock { clock: _, core_id } => {
-        if DOOMSDAY_CLOCK.with(|clock| clock.core_id).eq(core_id) {
-          cx.waker().wake_by_ref();
-        } else {
-          let armed = ARMAMENTS.fetch_add(1, Ordering::Relaxed) + 1;
+      State::DoomsdayClock { clock: _ } => {
+        let armed = ARMAMENTS.fetch_add(1, Ordering::Relaxed) + 1;
 
-          if armed == ARSENAL_SIZE {
-            ARSENAL_ARMED.notify_one();
-          }
+        if armed == ARSENAL_SIZE {
+          ARSENAL_ARMED.notify_one();
         }
 
         task::Poll::Pending
@@ -171,6 +163,7 @@ async fn main() {
   }
 
   ARSENAL_ARMED.notified().await;
+
   println!("At doom's doorstep:");
 }
 
