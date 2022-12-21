@@ -15,12 +15,12 @@ extern crate self as async_local;
 use std::{future::Future, marker::PhantomData, ops::Deref, ptr::addr_of, thread::LocalKey};
 
 #[cfg(feature = "async-std-runtime")]
-use async_std::task::{spawn_blocking, JoinError};
+use async_std::task::{spawn_blocking, JoinError, JoinHandle};
 pub use derive_async_local::AsContext;
 use shutdown_barrier::{defer_shutdown, guard_thread_shutdown, suspend_until_shutdown};
 use static_assertions::assert_cfg;
 #[cfg(feature = "tokio-runtime")]
-use tokio::task::{spawn_blocking, JoinError};
+use tokio::task::{spawn_blocking, JoinError, JoinHandle};
 /// A wrapper type used for creating pointers to thread-locals that are valid within an async context
 pub struct Context<T: Sync>(T);
 
@@ -32,7 +32,7 @@ where
   ///
   /// # Usage
   ///
-  /// Either wrap a type with Context and assign to a thread-local, or use as an unwrapped field in a struct that derives [AsContext]
+  /// Either wrap a type with Context and assign to a thread-local, or use as an unwrapped field in a struct that derives [AsContext].
   ///
   /// # Example
   ///
@@ -118,7 +118,7 @@ where
     }
   }
 
-  /// A wrapper around spawn_blocking that defers runtime shutdown for the lifetime of the blocking thread
+  /// A wrapper around spawn_blocking that protects [`LocalRef`] for the lifetime of the spawned thread
   ///
   /// Use the `tokio-runtime` feature flag for [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) or `async-std-runtime` for [`async_std::task::spawn_blocking`](https://docs.rs/async-std/latest/async_std/task/fn.spawn_blocking.html)
   #[cfg_attr(
@@ -126,16 +126,15 @@ where
     doc(cfg(any(feature = "tokio-runtime", feature = "async-std-runtime")))
   )]
   #[cfg(any(feature = "tokio-runtime", feature = "async-std-runtime"))]
-  pub async fn with_blocking<F, R>(self, f: F) -> Result<R, JoinError>
+  pub fn with_blocking<F, R>(self, f: F) -> JoinHandle<R>
   where
-    F: for<'a> FnOnce(&'a Self) -> R + Send + 'static,
+    F: for<'a> FnOnce(&'a LocalRef<T>) -> R + Send + 'static,
     R: Send + 'static,
   {
     spawn_blocking(move || {
       defer_shutdown();
       f(&self)
     })
-    .await
   }
 }
 
@@ -181,6 +180,26 @@ where
       inner: addr_of!(*context),
       _marker: PhantomData,
     }
+  }
+
+  /// A wrapper around spawn_blocking that protects [`RefGuard`] for the lifetime of the spawned thread
+  ///
+  /// Use the `tokio-runtime` feature flag for [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) or `async-std-runtime` for [`async_std::task::spawn_blocking`](https://docs.rs/async-std/latest/async_std/task/fn.spawn_blocking.html)
+  #[cfg_attr(
+    docsrs,
+    doc(cfg(any(feature = "tokio-runtime", feature = "async-std-runtime")))
+  )]
+  #[cfg(any(feature = "tokio-runtime", feature = "async-std-runtime"))]
+  pub fn with_blocking<F, R>(self, f: F) -> JoinHandle<R>
+  where
+    F: for<'b> FnOnce(RefGuard<'b, T>) -> R + Send + 'static,
+    R: Send + 'static,
+  {
+    let ref_guard = unsafe { std::mem::transmute(self) };
+    spawn_blocking(move || {
+      defer_shutdown();
+      f(ref_guard)
+    })
   }
 }
 
@@ -233,7 +252,7 @@ where
   #[cfg(any(feature = "tokio-runtime", feature = "async-std-runtime"))]
   async fn with_blocking<F, R>(&'static self, f: F) -> Result<R, JoinError>
   where
-    F: for<'a> FnOnce(&'a LocalRef<T::Target>) -> R + Send + 'static,
+    F: for<'a> FnOnce(RefGuard<'a, T::Target>) -> R + Send + 'static,
     R: Send + 'static;
 
   /// Create a thread-safe pointer to a thread local [`Context`]
@@ -293,14 +312,14 @@ where
   #[cfg(any(feature = "tokio-runtime", feature = "async-std-runtime"))]
   async fn with_blocking<F, R>(&'static self, f: F) -> Result<R, JoinError>
   where
-    F: for<'a> FnOnce(&'a LocalRef<T::Target>) -> R + Send + 'static,
+    F: for<'a> FnOnce(RefGuard<'a, T::Target>) -> R + Send + 'static,
     R: Send + 'static,
   {
-    let local_ref = unsafe { self.local_ref() };
+    let guarded_ref = unsafe { self.guarded_ref() };
 
     spawn_blocking(move || {
       defer_shutdown();
-      f(&local_ref)
+      f(guarded_ref)
     })
     .await
   }
@@ -334,6 +353,20 @@ mod tests {
   #[tokio::test(flavor = "multi_thread")]
   async fn with_blocking() {
     COUNTER
+      .with_blocking(|counter| counter.fetch_add(1, Ordering::Relaxed))
+      .await
+      .unwrap();
+
+    let guarded_ref = unsafe { COUNTER.guarded_ref() };
+
+    guarded_ref
+      .with_blocking(|counter| counter.fetch_add(1, Ordering::Relaxed))
+      .await
+      .unwrap();
+
+    let local_ref = unsafe { COUNTER.local_ref() };
+
+    local_ref
       .with_blocking(|counter| counter.fetch_add(1, Ordering::Relaxed))
       .await
       .unwrap();
