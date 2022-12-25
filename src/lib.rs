@@ -12,17 +12,33 @@ assert_cfg!(all(
 
 extern crate self as async_local;
 
-use std::{future::Future, marker::PhantomData, ops::Deref, ptr::addr_of, thread::LocalKey};
+use std::{
+  future::Future,
+  marker::PhantomData,
+  ops::Deref,
+  ptr::addr_of,
+  sync::{
+    atomic::{AtomicUsize, Ordering},
+    Condvar, Mutex,
+  },
+  thread::LocalKey,
+};
 
 #[cfg(feature = "async-std-runtime")]
-use async_std::task::{spawn_blocking, JoinError, JoinHandle};
+use async_std::task::{spawn_blocking, JoinHandle};
 pub use derive_async_local::AsContext;
-use shutdown_barrier::{defer_shutdown, guard_thread_shutdown, suspend_until_shutdown};
+use shutdown_barrier::{guard_thread_shutdown, suspend_until_shutdown};
 use static_assertions::assert_cfg;
 #[cfg(feature = "tokio-runtime")]
-use tokio::task::{spawn_blocking, JoinError, JoinHandle};
+use tokio::task::{spawn_blocking, JoinHandle};
+
 /// A wrapper type used for creating pointers to thread-locals that are valid within an async context
-pub struct Context<T: Sync>(T);
+pub struct Context<T: Sync> {
+  ref_count: AtomicUsize,
+  shutdown_finalized: Mutex<bool>,
+  cvar: Condvar,
+  inner: T,
+}
 
 impl<T> Context<T>
 where
@@ -46,7 +62,12 @@ where
   /// }
   /// ```
   pub fn new(inner: T) -> Context<T> {
-    Context(inner)
+    Context {
+      ref_count: AtomicUsize::new(0),
+      shutdown_finalized: Mutex::new(false),
+      cvar: Condvar::new(),
+      inner,
+    }
   }
 }
 
@@ -65,7 +86,7 @@ where
 {
   type Target = T;
   fn deref(&self) -> &Self::Target {
-    &self.0
+    &self.inner
   }
 }
 
@@ -74,9 +95,54 @@ where
   T: Sync,
 {
   fn drop(&mut self) {
+    if self.ref_count.fetch_add(1, Ordering::Relaxed).ne(&0) {
+      let mut shutdown_finalized = self.shutdown_finalized.lock().unwrap();
+      while (*shutdown_finalized).eq(&false) {
+        shutdown_finalized = self.cvar.wait(shutdown_finalized).unwrap();
+      }
+    }
+
     suspend_until_shutdown();
   }
 }
+
+struct ContextGuard<T: Sync + 'static>(*const Context<T>);
+
+impl<T> ContextGuard<T>
+where
+  T: Sync + 'static,
+{
+  fn new(context: *const Context<T>) -> Self {
+    let guard = ContextGuard(context);
+    guard.ref_count.fetch_add(1 << 1, Ordering::Relaxed);
+    guard
+  }
+}
+
+impl<T> Deref for ContextGuard<T>
+where
+  T: Sync,
+{
+  type Target = Context<T>;
+  fn deref(&self) -> &Self::Target {
+    unsafe { &*self.0 }
+  }
+}
+
+impl<T> Drop for ContextGuard<T>
+where
+  T: Sync + 'static,
+{
+  fn drop(&mut self) {
+    if self.ref_count.fetch_sub(1 << 1, Ordering::Relaxed).eq(&3) {
+      *self.shutdown_finalized.lock().unwrap() = true;
+      self.cvar.notify_one();
+    }
+  }
+}
+
+unsafe impl<T> Send for ContextGuard<T> where T: Sync {}
+unsafe impl<T> Sync for ContextGuard<T> where T: Sync {}
 
 /// A marker trait promising [AsRef](https://doc.rust-lang.org/std/convert/trait.AsRef.html)<[`Context<T>`]> is implemented in a way that can't be invalidated
 ///
@@ -131,9 +197,12 @@ where
     F: for<'a> FnOnce(&'a LocalRef<T>) -> R + Send + 'static,
     R: Send + 'static,
   {
+    let context_guard = ContextGuard::new(self.0);
+
     spawn_blocking(move || {
-      defer_shutdown();
-      f(&self)
+      let result = f(&self);
+      drop(context_guard);
+      result
     })
   }
 }
@@ -195,10 +264,13 @@ where
     F: for<'b> FnOnce(RefGuard<'b, T>) -> R + Send + 'static,
     R: Send + 'static,
   {
+    let context_guard = ContextGuard::new(self.inner);
     let ref_guard = unsafe { std::mem::transmute(self) };
+
     spawn_blocking(move || {
-      defer_shutdown();
-      f(ref_guard)
+      let result = f(ref_guard);
+      drop(context_guard);
+      result
     })
   }
 }
@@ -250,7 +322,7 @@ where
     doc(cfg(any(feature = "tokio-runtime", feature = "async-std-runtime")))
   )]
   #[cfg(any(feature = "tokio-runtime", feature = "async-std-runtime"))]
-  async fn with_blocking<F, R>(&'static self, f: F) -> Result<R, JoinError>
+  fn with_blocking<F, R>(&'static self, f: F) -> JoinHandle<R>
   where
     F: for<'a> FnOnce(RefGuard<'a, T::Target>) -> R + Send + 'static,
     R: Send + 'static;
@@ -272,8 +344,6 @@ where
   /// 4) ensure that a move into [`std::thread`] cannot occur or otherwise that [`LocalRef`] cannot be created nor derefenced outside of an async context by constraining use exclusively to within a pinned [`std::future::Future`] being polled or dropped and otherwise using [`RefGuard`] explicitly over any non-`'static` lifetime such as `'async_trait` to allow more flexible usage combined with async traits
   ///
   /// 5) only use [`std::thread::scope`] with validly created [`LocalRef`]
-  ///
-  /// 6) [`shutdown_barrier::defer_shutdown`](https://docs.rs/shutdown-barrier/latest/shutdown_barrier/fn.defer_shutdown.html) can be used to defer runtime shutdown for the lifetime of a thread as a way of making [`LocalRef`] valid to dereference by that thread.
   unsafe fn local_ref(&'static self) -> LocalRef<T::Target>;
 
   /// Create a lifetime-constrained thread-safe pointer to a thread local [`Context`]
@@ -310,18 +380,19 @@ where
     doc(cfg(any(feature = "tokio-runtime", feature = "async-std-runtime")))
   )]
   #[cfg(any(feature = "tokio-runtime", feature = "async-std-runtime"))]
-  async fn with_blocking<F, R>(&'static self, f: F) -> Result<R, JoinError>
+  fn with_blocking<F, R>(&'static self, f: F) -> JoinHandle<R>
   where
     F: for<'a> FnOnce(RefGuard<'a, T::Target>) -> R + Send + 'static,
     R: Send + 'static,
   {
     let guarded_ref = unsafe { self.guarded_ref() };
+    let context_guard = ContextGuard::new(guarded_ref.inner);
 
     spawn_blocking(move || {
-      defer_shutdown();
-      f(guarded_ref)
+      let result = f(guarded_ref);
+      drop(context_guard);
+      result
     })
-    .await
   }
 
   unsafe fn local_ref(&'static self) -> LocalRef<T::Target> {
