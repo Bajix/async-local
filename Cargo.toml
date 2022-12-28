@@ -20,6 +20,9 @@ tokio = { version = "1", features = ["rt"], optional = true }
 doomsday-clock = { path = "./doomsday-clock" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "rt"] }
 
+[target.'cfg(loom)'.dependencies]
+loom = { version = "0.5.6", features = [] }
+
 [lib]
 doctest = false
 bench = false

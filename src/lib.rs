@@ -12,11 +12,9 @@ assert_cfg!(all(
 
 extern crate self as async_local;
 
+use std::{future::Future, marker::PhantomData, ops::Deref, ptr::addr_of};
+#[cfg(not(loom))]
 use std::{
-  future::Future,
-  marker::PhantomData,
-  ops::Deref,
-  ptr::addr_of,
   sync::{
     atomic::{AtomicUsize, Ordering},
     Condvar, Mutex,
@@ -27,6 +25,14 @@ use std::{
 #[cfg(feature = "async-std-runtime")]
 use async_std::task::{spawn_blocking, JoinHandle};
 pub use derive_async_local::AsContext;
+#[cfg(loom)]
+use loom::{
+  sync::{
+    atomic::{AtomicUsize, Ordering},
+    Condvar, Mutex,
+  },
+  thread::LocalKey,
+};
 use shutdown_barrier::{guard_thread_shutdown, suspend_until_shutdown};
 use static_assertions::assert_cfg;
 #[cfg(feature = "tokio-runtime")]
@@ -363,7 +369,7 @@ where
 #[async_t::async_trait]
 impl<T> AsyncLocal<T> for LocalKey<T>
 where
-  T: AsContext,
+  T: AsContext + 'static,
 {
   async fn with_async<F, R, Fut>(&'static self, f: F) -> R
   where
@@ -404,7 +410,7 @@ where
   }
 }
 
-#[cfg(all(test))]
+#[cfg(all(test, not(loom)))]
 mod tests {
   use std::{
     io,
@@ -420,7 +426,6 @@ mod tests {
       static COUNTER: Context<AtomicUsize> = Context::new(AtomicUsize::new(0));
   }
 
-  #[cfg(feature = "tokio-runtime")]
   #[tokio::test(flavor = "multi_thread")]
   async fn with_blocking() {
     COUNTER
