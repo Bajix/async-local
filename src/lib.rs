@@ -470,6 +470,7 @@ mod tests {
     struct Counter;
     #[async_t::async_trait]
     trait Countable {
+      #[allow(clippy::needless_lifetimes)]
       async fn add_one(ref_guard: RefGuard<'async_trait, AtomicUsize>) -> usize;
     }
 

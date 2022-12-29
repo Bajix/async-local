@@ -33,7 +33,6 @@ pub fn derive_as_context(input: proc_macro::TokenStream) -> proc_macro::TokenStr
   if let Some(err) = input
     .generics
     .lifetimes()
-    .into_iter()
     .map(|lifetime| Error::new_spanned(lifetime, "cannot derive AsContext with lifetimes"))
     .reduce(|mut err, other| {
       err.combine(other);

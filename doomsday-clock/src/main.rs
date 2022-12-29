@@ -64,7 +64,7 @@ impl Drop for DoomsdayClock {
     match (disarmed, armed - disarmed) {
       (0, _) | (_, 0) => {
         if CORE_ID.fetch_sub(1, Ordering::AcqRel).eq(&1) {
-          println!("It is {} seconds to midnight", SECONDS_TO_MIDNIGHT);
+          println!("It is {SECONDS_TO_MIDNIGHT} seconds to midnight");
         }
       }
       (_, 1) => {
