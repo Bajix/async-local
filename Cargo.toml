@@ -39,3 +39,8 @@ members = ["derive-async-local", "doomsday-clock", "shutdown-barrier"]
 lto = "fat"
 opt-level = 3
 codegen-units = 1
+
+[package.metadata.docs.rs]
+features = ["boxed", "tokio-runtime", "async-std-runtime"]
+all-features = false
+rustdoc-args = ["--cfg", "docsrs"]
