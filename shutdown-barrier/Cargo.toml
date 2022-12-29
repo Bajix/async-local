@@ -13,7 +13,7 @@ doctest = false
 bench = false
 
 [dependencies]
-static_assertions = "1.1.0"
+static_assertions = "1.1"
 
 [target.'cfg(loom)'.dependencies]
-loom = { version = "0.5.6", features = [] }
+loom = { version = "0.5", features = [] }
