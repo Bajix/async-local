@@ -1,0 +1,59 @@
+version: "3"
+
+env:
+  TARGET: x86_64-apple-darwin
+
+tasks:
+  default:
+    cmds:
+      - task: clippy-tests
+      - task: test-barrier
+      - task: test-tokio
+      - task: test-async-std
+      - task: test-address-sanitizer
+
+  doc:
+    cmds:
+      - cargo +nightly doc -p async-local --open
+    env:
+      RUSTDOCFLAGS: --cfg docsrs
+
+  clippy-tests:
+    cmds:
+      - cargo clippy --tests
+
+  check-tests:
+    cmds:
+      - cargo check --tests
+
+  check-loom:
+    cmds:
+      - cargo check --tests
+    env:
+      RUSTFLAGS: --cfg loom
+
+  test-loom:
+    cmds:
+      - cargo test -p async-local --no-default-features -- --nocapture
+    env:
+      RUSTFLAGS: --cfg loom
+
+  test-async-std:
+    cmds:
+      - cargo test --no-default-features --features async-std-runtime -- --nocapture
+
+  test-tokio:
+    cmds:
+      - cargo test -- --nocapture
+
+  test-barrier:
+    cmds:
+      - cargo test -p shutdown-barrier -- --nocapture
+    env:
+      RUSTFLAGS: --cfg loom
+
+  test-address-sanitizer:
+    cmds:
+      - cargo test -Z build-std --target $TARGET --features tokio-runtime -- --nocapture
+    ev:
+      RUSTFLAGS: -Z sanitizer=address
