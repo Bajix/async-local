@@ -12,5 +12,8 @@ repository = "https://github.com/Bajix/async-local/"
 doctest = false
 bench = false
 
+[dependencies]
+static_assertions = "1.1.0"
+
 [target.'cfg(loom)'.dependencies]
 loom = { version = "0.5.6", features = [] }

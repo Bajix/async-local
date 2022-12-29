@@ -7,7 +7,11 @@ assert_cfg!(all(
     feature = "tokio-runtime",
     feature = "async-std-runtime"
   )),
-  any(feature = "tokio-runtime", feature = "async-std-runtime",)
+  any(
+    feature = "tokio-runtime",
+    feature = "async-std-runtime",
+    feature = "boxed"
+  )
 ));
 
 extern crate self as async_local;
@@ -118,6 +122,7 @@ impl<T> ContextGuard<T>
 where
   T: Sync + 'static,
 {
+  #[cfg(any(feature = "tokio-runtime", feature = "async-std-runtime"))]
   fn new(context: *const Context<T>) -> Self {
     let guard = ContextGuard(context);
     guard.ref_count.fetch_add(1 << 1, Ordering::Relaxed);
