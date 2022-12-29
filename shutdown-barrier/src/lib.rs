@@ -158,7 +158,7 @@ pub fn guard_thread_shutdown() {
   });
 }
 
-/// Suspend the current thread until all guarded threads rendezvous during shutdown. A thread will be suspended at most once this way and only if previously guarded.
+/// Suspend the current thread until all guarded threads rendezvous during shutdown. A thread will be suspended at most once this way and only if previously guarded by [`guard_thread_shutdown`]
 ///
 /// # Example
 ///

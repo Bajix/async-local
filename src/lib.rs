@@ -320,7 +320,7 @@ where
     F: FnOnce(RefGuard<'async_trait, T::Target>) -> Fut + Send,
     Fut: Future<Output = R> + Send;
 
-  /// A wrapper around spawn_blocking that defers runtime shutdown for the lifetime of the blocking thread
+  /// A wrapper around spawn_blocking that guards [`Context`] drops for the lifetime of the blocking thread
   ///
   /// Use the `tokio-runtime` feature flag for [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) or `async-std-runtime` for [`async_std::task::spawn_blocking`](https://docs.rs/async-std/latest/async_std/task/fn.spawn_blocking.html)
   #[cfg_attr(
