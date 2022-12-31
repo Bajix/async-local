@@ -122,7 +122,7 @@ impl<T> ContextGuard<T>
 where
   T: Sync + 'static,
 {
-  #[cfg(any(feature = "tokio-runtime", feature = "async-std-runtime"))]
+  #[cfg(any(feature = "tokio-runtime", feature = "async-std-runtime", loom))]
   fn new(context: *const Context<T>) -> Self {
     let guard = ContextGuard(context);
     guard.ref_count.fetch_add(1 << 1, Ordering::Relaxed);
@@ -417,19 +417,26 @@ where
 
 #[cfg(all(test))]
 mod tests {
+  #[cfg(all(
+    any(feature = "tokio-runtime", feature = "async-std-runtime"),
+    not(loom)
+  ))]
+  use std::sync::atomic::Ordering;
   #[cfg(not(loom))]
   use std::{
     io,
     process::{Command, Stdio},
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::atomic::AtomicUsize,
   };
 
+  #[cfg(feature = "async-std-runtime")]
+  use async_std::task::yield_now;
   #[cfg(loom)]
   use loom::{
     sync::atomic::{AtomicUsize, Ordering},
     thread_local,
   };
-  #[cfg(not(loom))]
+  #[cfg(feature = "tokio-runtime")]
   use tokio::task::yield_now;
 
   use super::*;
@@ -438,7 +445,7 @@ mod tests {
       static COUNTER: Context<AtomicUsize> = Context::new(AtomicUsize::new(0));
   }
 
-  #[cfg(not(loom))]
+  #[cfg(all(not(loom), feature = "tokio-runtime"))]
   #[tokio::test(flavor = "multi_thread")]
   async fn with_blocking() {
     COUNTER
@@ -461,6 +468,26 @@ mod tests {
       .unwrap();
   }
 
+  #[cfg(all(not(loom), feature = "async-std-runtime"))]
+  #[async_std::test]
+  async fn with_blocking() {
+    COUNTER
+      .with_blocking(|counter| counter.fetch_add(1, Ordering::Relaxed))
+      .await;
+
+    let guarded_ref = unsafe { COUNTER.guarded_ref() };
+
+    guarded_ref
+      .with_blocking(|counter| counter.fetch_add(1, Ordering::Relaxed))
+      .await;
+
+    let local_ref = unsafe { COUNTER.local_ref() };
+
+    local_ref
+      .with_blocking(|counter| counter.fetch_add(1, Ordering::Relaxed))
+      .await;
+  }
+
   #[cfg(loom)]
   #[test]
   fn guard_protects_context() {
@@ -479,16 +506,24 @@ mod tests {
     });
   }
 
-  #[cfg(not(loom))]
-  #[tokio::test(flavor = "multi_thread")]
+  #[cfg(all(
+    not(loom),
+    any(feature = "tokio-runtime", feature = "async-std-runtime")
+  ))]
+  #[cfg_attr(feature = "tokio-runtime", tokio::test(flavor = "multi_thread"))]
+  #[cfg_attr(feature = "async-std-runtime", async_std::test)]
   async fn ref_spans_await() {
     let counter = unsafe { COUNTER.local_ref() };
     yield_now().await;
     counter.fetch_add(1, Ordering::SeqCst);
   }
 
-  #[cfg(not(loom))]
-  #[tokio::test(flavor = "multi_thread")]
+  #[cfg(all(
+    not(loom),
+    any(feature = "tokio-runtime", feature = "async-std-runtime")
+  ))]
+  #[cfg_attr(feature = "tokio-runtime", tokio::test(flavor = "multi_thread"))]
+  #[cfg_attr(feature = "async-std-runtime", async_std::test)]
   async fn with_async() {
     COUNTER
       .with_async(|counter| async move {
@@ -498,8 +533,13 @@ mod tests {
       .await;
   }
 
-  #[cfg(not(loom))]
-  #[tokio::test(flavor = "multi_thread")]
+  #[cfg(all(
+    not(loom),
+    any(feature = "tokio-runtime", feature = "async-std-runtime")
+  ))]
+  #[cfg_attr(feature = "tokio-runtime", tokio::test(flavor = "multi_thread"))]
+  #[cfg_attr(feature = "async-std-runtime", async_std::test)]
+
   async fn bound_to_async_trait_lifetime() {
     struct Counter;
     #[async_t::async_trait]
