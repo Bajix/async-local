@@ -415,14 +415,21 @@ where
   }
 }
 
-#[cfg(all(test, not(loom)))]
+#[cfg(all(test))]
 mod tests {
+  #[cfg(not(loom))]
   use std::{
     io,
     process::{Command, Stdio},
     sync::atomic::{AtomicUsize, Ordering},
   };
 
+  #[cfg(loom)]
+  use loom::{
+    sync::atomic::{AtomicUsize, Ordering},
+    thread_local,
+  };
+  #[cfg(not(loom))]
   use tokio::task::yield_now;
 
   use super::*;
@@ -431,6 +438,7 @@ mod tests {
       static COUNTER: Context<AtomicUsize> = Context::new(AtomicUsize::new(0));
   }
 
+  #[cfg(not(loom))]
   #[tokio::test(flavor = "multi_thread")]
   async fn with_blocking() {
     COUNTER
@@ -453,13 +461,33 @@ mod tests {
       .unwrap();
   }
 
+  #[cfg(loom)]
+  #[test]
+  fn guard_protects_context() {
+    loom::model(|| {
+      let counter = Context::new(AtomicUsize::new(0));
+      let local_ref = unsafe { LocalRef::new(&counter) };
+      let guard = ContextGuard::new(addr_of!(counter));
+
+      loom::thread::spawn(move || {
+        let count = local_ref.fetch_add(1, Ordering::Relaxed);
+        assert_eq!(count, 0);
+        drop(guard);
+      });
+
+      drop(counter);
+    });
+  }
+
+  #[cfg(not(loom))]
   #[tokio::test(flavor = "multi_thread")]
   async fn ref_spans_await() {
     let counter = unsafe { COUNTER.local_ref() };
     yield_now().await;
-    counter.fetch_add(1, Ordering::Relaxed);
+    counter.fetch_add(1, Ordering::SeqCst);
   }
 
+  #[cfg(not(loom))]
   #[tokio::test(flavor = "multi_thread")]
   async fn with_async() {
     COUNTER
@@ -470,6 +498,7 @@ mod tests {
       .await;
   }
 
+  #[cfg(not(loom))]
   #[tokio::test(flavor = "multi_thread")]
   async fn bound_to_async_trait_lifetime() {
     struct Counter;
@@ -494,6 +523,7 @@ mod tests {
     Counter::add_one(counter).await;
   }
 
+  #[cfg(not(loom))]
   #[test]
   fn tokio_safely_shuts_down() -> io::Result<()> {
     Command::new("cargo")
@@ -507,6 +537,7 @@ mod tests {
     Ok(())
   }
 
+  #[cfg(not(loom))]
   #[test]
   fn async_std_safely_shuts_down() -> io::Result<()> {
     Command::new("cargo")
@@ -528,6 +559,7 @@ mod tests {
   }
 
   #[ignore]
+  #[cfg(not(loom))]
   #[test]
   fn smol_safely_shuts_down() -> io::Result<()> {
     Command::new("cargo")
