@@ -1,8 +1,3 @@
-assert_cfg!(not(all(
-  feature = "tokio-runtime",
-  feature = "async-std-runtime"
-)),);
-
 #[cfg(loom)]
 use std::ops::Deref;
 #[cfg(not(loom))]
@@ -25,7 +20,6 @@ use loom::{
   },
   thread_local,
 };
-use static_assertions::assert_cfg;
 
 #[derive(Default)]
 struct ShutdownBarrier {

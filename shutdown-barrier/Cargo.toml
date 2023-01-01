@@ -12,13 +12,5 @@ repository = "https://github.com/Bajix/async-local/"
 doctest = false
 bench = false
 
-[dependencies]
-static_assertions = "1.1"
-
 [target.'cfg(loom)'.dependencies]
 loom = { version = "0.5", features = [] }
-
-[package.metadata.docs.rs]
-features = ["tokio-runtime", "async-std-runtime"]
-all-features = false
-rustdoc-args = ["--cfg", "docsrs"]

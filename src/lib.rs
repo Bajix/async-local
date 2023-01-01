@@ -2,17 +2,10 @@
 #![cfg_attr(test, feature(exit_status_error))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-assert_cfg!(all(
-  not(all(
-    feature = "tokio-runtime",
-    feature = "async-std-runtime"
-  )),
-  any(
-    feature = "tokio-runtime",
-    feature = "async-std-runtime",
-    feature = "boxed"
-  )
-));
+assert_cfg!(not(all(
+  feature = "tokio-runtime",
+  feature = "async-std-runtime"
+)));
 
 extern crate self as async_local;
 
