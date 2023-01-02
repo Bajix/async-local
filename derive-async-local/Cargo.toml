@@ -2,7 +2,7 @@
 name = "derive-async-local"
 authors = ["Thomas Sieverding <Thomas@bajix.com>"]
 edition = "2021"
-version = "0.6.0"
+version = "0.7.0"
 description = "Derives for async-local"
 readme = "./README.md"
 license = "MIT"

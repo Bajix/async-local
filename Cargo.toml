@@ -2,7 +2,7 @@
 authors = ["Thomas Sieverding <Thomas@bajix.com>"]
 edition = "2021"
 name = "async-local"
-version = "0.6.0"
+version = "0.7.0"
 description = "For safely extending the lifetime of thread locals"
 readme = "./README.md"
 license = "MIT"
@@ -11,10 +11,14 @@ repository = "https://github.com/Bajix/async-local/"
 [dependencies]
 async_t = "0.7"
 async-std = { version = "1", features = ["attributes"], optional = true }
-derive-async-local = { version = "0.6.0", path = "./derive-async-local" }
-shutdown-barrier = { version = "1", path = "./shutdown-barrier" }
+derive-async-local = { version = "0.7.0", path = "./derive-async-local" }
+shutdown-barrier = { version = "2", path = "./shutdown-barrier" }
 static_assertions = "1.1"
-tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"], optional = true }
+tokio = { version = "1", features = [
+  "macros",
+  "rt-multi-thread",
+  "rt",
+], optional = true }
 
 [target.'cfg(loom)'.dependencies]
 loom = { version = "0.5", features = [] }
@@ -25,6 +29,7 @@ bench = false
 
 [features]
 default = ["tokio-runtime"]
+# This crate conditionally makes use of the nightly only feature [type_alias_impl_trait](https://rust-lang.github.io/rfcs/2515-type_alias_impl_trait.html) to allow [AsyncLocal::with_async](https://docs.rs/async-local/latest/async_local/trait.AsyncLocal.html#tymethod.with_async) to be unboxed. To compile on `stable` the `boxed` feature flag can be used to downgrade [async_t::async_trait](https://docs.rs/async_t/latest/async_t/attr.async_trait.html) to [async_trait::async_trait](https://docs.rs/async-trait/latest/async_trait).
 boxed = ["async_t/boxed"]
 tokio-runtime = ["tokio"]
 async-std-runtime = ["async-std"]
@@ -38,6 +43,5 @@ opt-level = 3
 codegen-units = 1
 
 [package.metadata.docs.rs]
-features = ["boxed", "tokio-runtime", "async-std-runtime"]
 all-features = false
 rustdoc-args = ["--cfg", "docsrs"]
