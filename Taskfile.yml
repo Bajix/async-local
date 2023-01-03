@@ -34,17 +34,17 @@ tasks:
 
   test-loom:
     cmds:
-      - cargo test -p async-local --no-default-features -- --nocapture
+      - cargo test -p async-local -- --nocapture
     env:
       RUSTFLAGS: --cfg loom
 
   test-async-std:
     cmds:
-      - cargo test --no-default-features --features async-std-runtime -- --nocapture
+      - cargo test -p async-local --features async-std-runtime -- --nocapture
 
   test-tokio:
     cmds:
-      - cargo test -- --nocapture
+      - cargo test -p async-local --features tokio-runtime -- --nocapture
 
   test-barrier:
     cmds:

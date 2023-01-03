@@ -2,14 +2,14 @@
 authors = ["Thomas Sieverding <Thomas@bajix.com>"]
 edition = "2021"
 name = "doomsday-clock"
-version = "0.7.0"
+version = "0.8.0"
 description = "Async runtime shutdown safety test. Handle with care"
 readme = "./README.md"
 license = "MIT"
 repository = "https://github.com/Bajix/async-local/"
 
 [dependencies]
-async-local = { path = "../", version = "0.7.0" }
+async-local = { path = "../", version = "0.8.0" }
 async-std = { version = "1", features = ["attributes"], optional = true }
 easy-parallel = { version = "3.2", optional = true }
 num_cpus = "1.15"
