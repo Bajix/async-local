@@ -35,7 +35,7 @@ use static_assertions::assert_cfg;
 #[cfg(feature = "tokio-runtime")]
 use tokio::task::{spawn_blocking, JoinHandle};
 
-/// A wrapper type used for creating pointers to thread-locals that are valid within an async context
+/// A wrapper type used for creating pointers to thread-locals
 pub struct Context<T: Sync> {
   ref_count: AtomicUsize,
   shutdown_finalized: Mutex<bool>,
