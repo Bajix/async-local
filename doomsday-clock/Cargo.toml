@@ -26,8 +26,8 @@ test = false
 
 [features]
 default = ["tokio-runtime"]
-async-std-runtime = ["async-std"]
-tokio-runtime = ["tokio/macros", "tokio/rt-multi-thread", "tokio/rt"]
+async-std-runtime = ["async-local/async-std-runtime", "async-std"]
+tokio-runtime = ["async-local/tokio-runtime", "tokio/macros", "tokio/rt-multi-thread", "tokio/rt"]
 smol-runtime = ["smol", "easy-parallel"]
 
 [package.metadata.docs.rs]

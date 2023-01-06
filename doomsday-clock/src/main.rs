@@ -17,9 +17,11 @@ assert_cfg!(all(
 use std::{
   cell::Cell,
   future::Future,
+  ops::Deref,
   pin::Pin,
   sync::atomic::{AtomicBool, AtomicUsize, Ordering},
   task,
+  time::Duration,
 };
 
 use async_local::{AsContext, AsyncLocal, Context, LocalRef};
@@ -35,11 +37,27 @@ static ARSENAL_ARMED: Notify = Notify::const_new();
 static ARMAMENTS: AtomicUsize = AtomicUsize::new(0);
 static CLOCK_DROPPED: AtomicBool = AtomicBool::new(false);
 
+#[derive(Default)]
+pub struct Counter(AtomicUsize);
+
+impl Drop for Counter {
+  fn drop(&mut self) {
+    CLOCK_DROPPED.fetch_or(true, Ordering::Release);
+  }
+}
+
+impl Deref for Counter {
+  type Target = AtomicUsize;
+  fn deref(&self) -> &Self::Target {
+    &self.0
+  }
+}
+
 #[derive(AsContext)]
 pub struct DoomsdayClock {
   core_id: usize,
   armed: Cell<usize>,
-  disarmed: Context<AtomicUsize>,
+  disarmed: Context<Counter>,
 }
 
 impl DoomsdayClock {
@@ -49,15 +67,13 @@ impl DoomsdayClock {
     DoomsdayClock {
       core_id,
       armed: Cell::new(0),
-      disarmed: Context::new(AtomicUsize::new(0)),
+      disarmed: Context::new(Counter::default()),
     }
   }
 }
 
 impl Drop for DoomsdayClock {
   fn drop(&mut self) {
-    CLOCK_DROPPED.fetch_or(true, Ordering::Release);
-
     let armed = self.armed.get();
     let disarmed = self.disarmed.load(Ordering::Acquire);
 
@@ -89,7 +105,7 @@ thread_local! {
 #[pin_project]
 enum State {
   Proliferating,
-  DoomsdayClock { clock: LocalRef<AtomicUsize> },
+  DoomsdayClock { clock: LocalRef<Counter> },
 }
 
 #[pin_project(PinnedDrop)]
@@ -113,7 +129,10 @@ impl PinnedDrop for NuclearWarhead {
     }
 
     if let State::DoomsdayClock { clock } = &self.state {
-      clock.fetch_add(1, Ordering::Release);
+      assert!(
+        clock.fetch_add(1, Ordering::Release) < ARSENAL_SIZE,
+        "Impossible value detected indicating dereference to an invalidated context"
+      );
     }
   }
 }
@@ -142,6 +161,8 @@ impl Future for NuclearWarhead {
 
         if armed == ARSENAL_SIZE {
           ARSENAL_ARMED.notify_one();
+        } else {
+          std::thread::sleep(Duration::from_millis(5));
         }
 
         task::Poll::Pending
