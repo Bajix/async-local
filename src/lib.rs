@@ -2,6 +2,7 @@
 #![cfg_attr(test, feature(exit_status_error))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+#[cfg(test)]
 assert_cfg!(not(all(
   feature = "tokio-runtime",
   feature = "async-std-runtime"
@@ -9,39 +10,19 @@ assert_cfg!(not(all(
 
 extern crate self as async_local;
 
-use std::{future::Future, marker::PhantomData, ops::Deref, ptr::addr_of};
 #[cfg(not(loom))]
-use std::{
-  sync::{
-    atomic::{AtomicUsize, Ordering},
-    Condvar, Mutex,
-  },
-  thread::LocalKey,
-};
+use std::thread::LocalKey;
+use std::{future::Future, marker::PhantomData, ops::Deref, ptr::addr_of};
 
-#[cfg(feature = "async-std-runtime")]
-use async_std::task::{spawn_blocking, JoinHandle};
 pub use derive_async_local::AsContext;
 #[cfg(loom)]
-use loom::{
-  sync::{
-    atomic::{AtomicUsize, Ordering},
-    Condvar, Mutex,
-  },
-  thread::LocalKey,
-};
+use loom::thread::LocalKey;
 use shutdown_barrier::{guard_thread_shutdown, suspend_until_shutdown};
+#[cfg(test)]
 use static_assertions::assert_cfg;
-#[cfg(feature = "tokio-runtime")]
-use tokio::task::{spawn_blocking, JoinHandle};
 
 /// A wrapper type used for creating pointers to thread-locals
-pub struct Context<T: Sync> {
-  ref_count: AtomicUsize,
-  shutdown_finalized: Mutex<bool>,
-  cvar: Condvar,
-  inner: T,
-}
+pub struct Context<T: Sync>(T);
 
 impl<T> Context<T>
 where
@@ -65,12 +46,7 @@ where
   /// }
   /// ```
   pub fn new(inner: T) -> Context<T> {
-    Context {
-      ref_count: AtomicUsize::new(0),
-      shutdown_finalized: Mutex::new(false),
-      cvar: Condvar::new(),
-      inner,
-    }
+    Context(inner)
   }
 }
 
@@ -89,7 +65,7 @@ where
 {
   type Target = T;
   fn deref(&self) -> &Self::Target {
-    &self.inner
+    &self.0
   }
 }
 
@@ -98,55 +74,9 @@ where
   T: Sync,
 {
   fn drop(&mut self) {
-    if self.ref_count.fetch_add(1, Ordering::Relaxed).ne(&0) {
-      let mut shutdown_finalized = self.shutdown_finalized.lock().unwrap();
-      while (*shutdown_finalized).eq(&false) {
-        shutdown_finalized = self.cvar.wait(shutdown_finalized).unwrap();
-      }
-    }
-
     suspend_until_shutdown();
   }
 }
-
-struct ContextGuard<T: Sync + 'static>(*const Context<T>);
-
-impl<T> ContextGuard<T>
-where
-  T: Sync + 'static,
-{
-  #[cfg(any(feature = "tokio-runtime", feature = "async-std-runtime", loom))]
-  fn new(context: *const Context<T>) -> Self {
-    let guard = ContextGuard(context);
-    guard.ref_count.fetch_add(1 << 1, Ordering::Relaxed);
-    guard
-  }
-}
-
-impl<T> Deref for ContextGuard<T>
-where
-  T: Sync,
-{
-  type Target = Context<T>;
-  fn deref(&self) -> &Self::Target {
-    unsafe { &*self.0 }
-  }
-}
-
-impl<T> Drop for ContextGuard<T>
-where
-  T: Sync + 'static,
-{
-  fn drop(&mut self) {
-    if self.ref_count.fetch_sub(1 << 1, Ordering::Relaxed).eq(&3) {
-      *self.shutdown_finalized.lock().unwrap() = true;
-      self.cvar.notify_one();
-    }
-  }
-}
-
-unsafe impl<T> Send for ContextGuard<T> where T: Sync {}
-unsafe impl<T> Sync for ContextGuard<T> where T: Sync {}
 
 /// A marker trait promising [AsRef](https://doc.rust-lang.org/std/convert/trait.AsRef.html)<[`Context<T>`]> is implemented in a way that can't be invalidated
 ///
@@ -186,28 +116,6 @@ where
       inner: self.0,
       _marker: PhantomData,
     }
-  }
-
-  /// A wrapper around spawn_blocking that protects [`LocalRef`] for the lifetime of the spawned thread
-  ///
-  /// Use the `tokio-runtime` feature flag for [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) or `async-std-runtime` for [`async_std::task::spawn_blocking`](https://docs.rs/async-std/latest/async_std/task/fn.spawn_blocking.html)
-  #[cfg_attr(
-    docsrs,
-    doc(cfg(any(feature = "tokio-runtime", feature = "async-std-runtime")))
-  )]
-  #[cfg(any(feature = "tokio-runtime", feature = "async-std-runtime"))]
-  pub fn with_blocking<F, R>(self, f: F) -> JoinHandle<R>
-  where
-    F: for<'a> FnOnce(&'a LocalRef<T>) -> R + Send + 'static,
-    R: Send + 'static,
-  {
-    let context_guard = ContextGuard::new(self.0);
-
-    spawn_blocking(move || {
-      let result = f(&self);
-      drop(context_guard);
-      result
-    })
   }
 }
 
@@ -254,29 +162,6 @@ where
       _marker: PhantomData,
     }
   }
-
-  /// A wrapper around spawn_blocking that protects [`RefGuard`] for the lifetime of the spawned thread
-  ///
-  /// Use the `tokio-runtime` feature flag for [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) or `async-std-runtime` for [`async_std::task::spawn_blocking`](https://docs.rs/async-std/latest/async_std/task/fn.spawn_blocking.html)
-  #[cfg_attr(
-    docsrs,
-    doc(cfg(any(feature = "tokio-runtime", feature = "async-std-runtime")))
-  )]
-  #[cfg(any(feature = "tokio-runtime", feature = "async-std-runtime"))]
-  pub fn with_blocking<F, R>(self, f: F) -> JoinHandle<R>
-  where
-    F: for<'b> FnOnce(RefGuard<'b, T>) -> R + Send + 'static,
-    R: Send + 'static,
-  {
-    let context_guard = ContextGuard::new(self.inner);
-    let ref_guard = unsafe { std::mem::transmute(self) };
-
-    spawn_blocking(move || {
-      let result = f(ref_guard);
-      drop(context_guard);
-      result
-    })
-  }
 }
 
 impl<'a, T> Deref for RefGuard<'a, T>
@@ -317,19 +202,6 @@ where
   where
     F: FnOnce(RefGuard<'async_trait, T::Target>) -> Fut + Send,
     Fut: Future<Output = R> + Send;
-
-  /// A wrapper around spawn_blocking that guards [`Context`] drops for the lifetime of the blocking thread
-  ///
-  /// Use the `tokio-runtime` feature flag for [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) or `async-std-runtime` for [`async_std::task::spawn_blocking`](https://docs.rs/async-std/latest/async_std/task/fn.spawn_blocking.html)
-  #[cfg_attr(
-    docsrs,
-    doc(cfg(any(feature = "tokio-runtime", feature = "async-std-runtime")))
-  )]
-  #[cfg(any(feature = "tokio-runtime", feature = "async-std-runtime"))]
-  fn with_blocking<F, R>(&'static self, f: F) -> JoinHandle<R>
-  where
-    F: for<'a> FnOnce(RefGuard<'a, T::Target>) -> R + Send + 'static,
-    R: Send + 'static;
 
   /// Create a thread-safe pointer to a thread local [`Context`]
   ///
@@ -379,26 +251,6 @@ where
     f(local_ref).await
   }
 
-  #[cfg_attr(
-    docsrs,
-    doc(cfg(any(feature = "tokio-runtime", feature = "async-std-runtime")))
-  )]
-  #[cfg(any(feature = "tokio-runtime", feature = "async-std-runtime"))]
-  fn with_blocking<F, R>(&'static self, f: F) -> JoinHandle<R>
-  where
-    F: for<'a> FnOnce(RefGuard<'a, T::Target>) -> R + Send + 'static,
-    R: Send + 'static,
-  {
-    let guarded_ref = unsafe { self.guarded_ref() };
-    let context_guard = ContextGuard::new(guarded_ref.inner);
-
-    spawn_blocking(move || {
-      let result = f(guarded_ref);
-      drop(context_guard);
-      result
-    })
-  }
-
   unsafe fn local_ref(&'static self) -> LocalRef<T::Target> {
     self.with(|value| LocalRef::new(value.as_ref()))
   }
@@ -436,49 +288,6 @@ mod tests {
 
   thread_local! {
       static COUNTER: Context<AtomicUsize> = Context::new(AtomicUsize::new(0));
-  }
-
-  #[cfg(all(not(loom), feature = "tokio-runtime"))]
-  #[tokio::test(flavor = "multi_thread")]
-  async fn with_blocking() {
-    COUNTER
-      .with_blocking(|counter| counter.fetch_add(1, Ordering::Relaxed))
-      .await
-      .unwrap();
-
-    let guarded_ref = unsafe { COUNTER.guarded_ref() };
-
-    guarded_ref
-      .with_blocking(|counter| counter.fetch_add(1, Ordering::Relaxed))
-      .await
-      .unwrap();
-
-    let local_ref = unsafe { COUNTER.local_ref() };
-
-    local_ref
-      .with_blocking(|counter| counter.fetch_add(1, Ordering::Relaxed))
-      .await
-      .unwrap();
-  }
-
-  #[cfg(all(not(loom), feature = "async-std-runtime"))]
-  #[async_std::test]
-  async fn with_blocking() {
-    COUNTER
-      .with_blocking(|counter| counter.fetch_add(1, Ordering::Relaxed))
-      .await;
-
-    let guarded_ref = unsafe { COUNTER.guarded_ref() };
-
-    guarded_ref
-      .with_blocking(|counter| counter.fetch_add(1, Ordering::Relaxed))
-      .await;
-
-    let local_ref = unsafe { COUNTER.local_ref() };
-
-    local_ref
-      .with_blocking(|counter| counter.fetch_add(1, Ordering::Relaxed))
-      .await;
   }
 
   #[cfg(loom)]
