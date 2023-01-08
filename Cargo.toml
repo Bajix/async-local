@@ -39,7 +39,12 @@ tokio-runtime = ["tokio"]
 async-std-runtime = ["async-std"]
 
 [workspace]
-members = ["derive-async-local", "doomsday-clock", "shutdown-barrier"]
+members = [
+  "derive-async-local",
+  "doomsday-clock",
+  "shutdown-barrier",
+  "tls-validity-check",
+]
 
 [profile.release]
 lto = "fat"

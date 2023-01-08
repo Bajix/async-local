@@ -1,0 +1,15 @@
+[package]
+name = "tls-validity-check"
+authors = ["Thomas Sieverding <Thomas@bajix.com>"]
+edition = "2021"
+version = "0.0.1"
+description = ""
+license = "MIT"
+repository = "https://github.com/Bajix/async-local/"
+publish = false
+
+[[bin]]
+name = "tls-validity-check"
+doctest = false
+bench = false
+test = false
