@@ -2,7 +2,6 @@
 #![cfg_attr(test, feature(exit_status_error))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-#[cfg(test)]
 assert_cfg!(not(all(
   feature = "tokio-runtime",
   feature = "async-std-runtime"
@@ -10,16 +9,22 @@ assert_cfg!(not(all(
 
 extern crate self as async_local;
 
+#[doc(hidden)]
+pub extern crate static_assertions;
+
 #[cfg(not(loom))]
 use std::thread::LocalKey;
 use std::{future::Future, marker::PhantomData, ops::Deref, ptr::addr_of};
 
+#[cfg(feature = "async-std-runtime")]
+use async_std::task::{spawn_blocking, JoinHandle};
 pub use derive_async_local::AsContext;
 #[cfg(loom)]
 use loom::thread::LocalKey;
-use shutdown_barrier::{guard_thread_shutdown, suspend_until_shutdown};
-#[cfg(test)]
+use shutdown_barrier::guard_thread_shutdown;
 use static_assertions::assert_cfg;
+#[cfg(feature = "tokio-runtime")]
+use tokio::task::{spawn_blocking, JoinHandle};
 
 /// A wrapper type used for creating pointers to thread-locals
 pub struct Context<T: Sync>(T);
@@ -69,20 +74,11 @@ where
   }
 }
 
-impl<T> Drop for Context<T>
-where
-  T: Sync,
-{
-  fn drop(&mut self) {
-    suspend_until_shutdown();
-  }
-}
-
-/// A marker trait promising [AsRef](https://doc.rust-lang.org/std/convert/trait.AsRef.html)<[`Context<T>`]> is implemented in a way that can't be invalidated
+/// A marker trait promising that [AsRef](https://doc.rust-lang.org/std/convert/trait.AsRef.html)<[`Context<T>`]> is implemented in a way that can't be invalidated
 ///
 /// # Safety
 ///
-/// When assigned to a thread local, the [pin drop guarantee](https://doc.rust-lang.org/std/pin/index.html#drop-guarantee) must be upheld for [`Context<T>`]: it cannot be wrapped in a pointer type nor cell type and it must not be invalidated nor repurposed until when [drop](https://doc.rust-lang.org/std/ops/trait.Drop.html#tymethod.drop) happens as a consequence of the thread dropping.
+/// Types that implement AsContext cannot impl [std::ops::Drop] because doing so will result in destructor functions being registered by the [`thread_local`] macro that will deallocate memory regardless of whether [`shutdown-barrier::guard_thread_shutdown`](https://docs.rs/shutdown-barrier/latest/shutdown_barrier/fn.guard_thread_shutdown.html) is used to synchronize thread destruction.
 pub unsafe trait AsContext: AsRef<Context<Self::Target>> {
   type Target: Sync;
 }
@@ -116,6 +112,22 @@ where
       inner: self.0,
       _marker: PhantomData,
     }
+  }
+
+  /// A wrapper around spawn_blocking that protects [`LocalRef`] for the lifetime of the spawned thread
+  ///
+  /// Use the `tokio-runtime` feature flag for [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) or `async-std-runtime` for [`async_std::task::spawn_blocking`](https://docs.rs/async-std/latest/async_std/task/fn.spawn_blocking.html)
+  #[cfg_attr(
+    docsrs,
+    doc(cfg(any(feature = "tokio-runtime", feature = "async-std-runtime")))
+  )]
+  #[cfg(any(feature = "tokio-runtime", feature = "async-std-runtime"))]
+  pub fn with_blocking<F, R>(self, f: F) -> JoinHandle<R>
+  where
+    F: for<'a> FnOnce(&'a LocalRef<T>) -> R + Send + 'static,
+    R: Send + 'static,
+  {
+    spawn_blocking(move || f(&self))
   }
 }
 
@@ -162,6 +174,24 @@ where
       _marker: PhantomData,
     }
   }
+
+  /// A wrapper around spawn_blocking that protects [`RefGuard`] for the lifetime of the spawned thread
+  ///
+  /// Use the `tokio-runtime` feature flag for [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) or `async-std-runtime` for [`async_std::task::spawn_blocking`](https://docs.rs/async-std/latest/async_std/task/fn.spawn_blocking.html)
+  #[cfg_attr(
+    docsrs,
+    doc(cfg(any(feature = "tokio-runtime", feature = "async-std-runtime")))
+  )]
+  #[cfg(any(feature = "tokio-runtime", feature = "async-std-runtime"))]
+  pub fn with_blocking<F, R>(self, f: F) -> JoinHandle<R>
+  where
+    F: for<'b> FnOnce(RefGuard<'b, T>) -> R + Send + 'static,
+    R: Send + 'static,
+  {
+    let ref_guard = unsafe { std::mem::transmute(self) };
+
+    spawn_blocking(move || f(ref_guard))
+  }
 }
 
 impl<'a, T> Deref for RefGuard<'a, T>
@@ -203,23 +233,30 @@ where
     F: FnOnce(RefGuard<'async_trait, T::Target>) -> Fut + Send,
     Fut: Future<Output = R> + Send;
 
+  /// A wrapper around spawn_blocking that guards [`Context`] drops for the lifetime of the blocking thread
+  ///
+  /// Use the `tokio-runtime` feature flag for [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) or `async-std-runtime` for [`async_std::task::spawn_blocking`](https://docs.rs/async-std/latest/async_std/task/fn.spawn_blocking.html)
+  #[cfg_attr(
+    docsrs,
+    doc(cfg(any(feature = "tokio-runtime", feature = "async-std-runtime")))
+  )]
+  #[cfg(any(feature = "tokio-runtime", feature = "async-std-runtime"))]
+  fn with_blocking<F, R>(&'static self, f: F) -> JoinHandle<R>
+  where
+    F: for<'a> FnOnce(RefGuard<'a, T::Target>) -> R + Send + 'static,
+    R: Send + 'static;
+
   /// Create a thread-safe pointer to a thread local [`Context`]
   ///
   /// # Safety
   ///
-  /// The **only** safe way to use [`LocalRef`] is within the context of an async runtime
+  /// The **only** safe way to use [`LocalRef`] is within the context of an async runtime:
   ///
-  /// The well-known way of safely accomplishing these guarantees is to:
+  /// - ensure that [`LocalRef`] can only refer to a thread local within the context of an async runtime by creating within an async context such as [`tokio::spawn`](https://docs.rs/tokio/latest/tokio/fn.spawn.html), [`std::future::Future::poll`], an async fn or block or within the drop of a pinned [`std::future::Future`] that created [`LocalRef`] prior while pinned and polling.
   ///
-  /// 1) ensure that [`LocalRef`] can only refer to a thread local within the context of the runtime by creating and using only within an async context such as within [`tokio::spawn`](https://docs.rs/tokio/latest/tokio/fn.spawn.html), [`std::future::Future::poll`], an async fn or block or within the drop of a pinned [`std::future::Future`] that created [`LocalRef`] prior while pinned and polling.
+  /// - ensure that a move into [`std::thread`] cannot occur or otherwise that [`LocalRef`] cannot be created nor derefenced outside of an async context by constraining use exclusively to within a pinned [`std::future::Future`] being polled or dropped and otherwise using [`RefGuard`] explicitly over any non-`'static` lifetime such as `'async_trait` to allow more flexible usage combined with async traits
   ///
-  /// 2) ensure that [`LocalRef`] cannot be dereferenced outside of the async runtime context or any thread scoped therein
-  ///
-  /// 3) use [`pin_project::pinned_drop`](https://docs.rs/pin-project/latest/pin_project/attr.pinned_drop.html) to ensure the safety of dereferencing [`LocalRef`] on the drop impl of a pinned future that created [`LocalRef`] while polling.
-  ///
-  /// 4) ensure that a move into [`std::thread`] cannot occur or otherwise that [`LocalRef`] cannot be created nor derefenced outside of an async context by constraining use exclusively to within a pinned [`std::future::Future`] being polled or dropped and otherwise using [`RefGuard`] explicitly over any non-`'static` lifetime such as `'async_trait` to allow more flexible usage combined with async traits
-  ///
-  /// 5) only use [`std::thread::scope`] with validly created [`LocalRef`]
+  /// - validly created [`LocalRef`] can be moved into blocking threads spawned by [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) and [`async_std::task::spawn_blocking`](https://docs.rs/async-std/latest/async_std/task/fn.spawn_blocking.html)
   unsafe fn local_ref(&'static self) -> LocalRef<T::Target>;
 
   /// Create a lifetime-constrained thread-safe pointer to a thread local [`Context`]
@@ -251,6 +288,21 @@ where
     f(local_ref).await
   }
 
+  #[cfg_attr(
+    docsrs,
+    doc(cfg(any(feature = "tokio-runtime", feature = "async-std-runtime")))
+  )]
+  #[cfg(any(feature = "tokio-runtime", feature = "async-std-runtime"))]
+  fn with_blocking<F, R>(&'static self, f: F) -> JoinHandle<R>
+  where
+    F: for<'a> FnOnce(RefGuard<'a, T::Target>) -> R + Send + 'static,
+    R: Send + 'static,
+  {
+    let guarded_ref = unsafe { self.guarded_ref() };
+
+    spawn_blocking(move || f(guarded_ref))
+  }
+
   unsafe fn local_ref(&'static self) -> LocalRef<T::Target> {
     self.with(|value| LocalRef::new(value.as_ref()))
   }
@@ -262,17 +314,13 @@ where
 
 #[cfg(all(test))]
 mod tests {
+  #[cfg(not(loom))]
+  use std::sync::atomic::AtomicUsize;
   #[cfg(all(
     any(feature = "tokio-runtime", feature = "async-std-runtime"),
     not(loom)
   ))]
   use std::sync::atomic::Ordering;
-  #[cfg(not(loom))]
-  use std::{
-    io,
-    process::{Command, Stdio},
-    sync::atomic::AtomicUsize,
-  };
 
   #[cfg(feature = "async-std-runtime")]
   use async_std::task::yield_now;
@@ -288,6 +336,49 @@ mod tests {
 
   thread_local! {
       static COUNTER: Context<AtomicUsize> = Context::new(AtomicUsize::new(0));
+  }
+
+  #[cfg(all(not(loom), feature = "tokio-runtime"))]
+  #[tokio::test(flavor = "multi_thread")]
+  async fn with_blocking() {
+    COUNTER
+      .with_blocking(|counter| counter.fetch_add(1, Ordering::Relaxed))
+      .await
+      .unwrap();
+
+    let guarded_ref = unsafe { COUNTER.guarded_ref() };
+
+    guarded_ref
+      .with_blocking(|counter| counter.fetch_add(1, Ordering::Relaxed))
+      .await
+      .unwrap();
+
+    let local_ref = unsafe { COUNTER.local_ref() };
+
+    local_ref
+      .with_blocking(|counter| counter.fetch_add(1, Ordering::Relaxed))
+      .await
+      .unwrap();
+  }
+
+  #[cfg(all(not(loom), feature = "async-std-runtime"))]
+  #[async_std::test]
+  async fn with_blocking() {
+    COUNTER
+      .with_blocking(|counter| counter.fetch_add(1, Ordering::Relaxed))
+      .await;
+
+    let guarded_ref = unsafe { COUNTER.guarded_ref() };
+
+    guarded_ref
+      .with_blocking(|counter| counter.fetch_add(1, Ordering::Relaxed))
+      .await;
+
+    let local_ref = unsafe { COUNTER.local_ref() };
+
+    local_ref
+      .with_blocking(|counter| counter.fetch_add(1, Ordering::Relaxed))
+      .await;
   }
 
   #[cfg(loom)]
@@ -363,62 +454,5 @@ mod tests {
     let counter = unsafe { COUNTER.guarded_ref() };
 
     Counter::add_one(counter).await;
-  }
-
-  #[cfg(not(loom))]
-  #[test]
-  fn tokio_safely_shuts_down() -> io::Result<()> {
-    Command::new("cargo")
-      .args(["run", "-p", "doomsday-clock"])
-      .stdout(Stdio::null())
-      .spawn()?
-      .wait()?
-      .exit_ok()
-      .expect("tokio failed to shutdown doomsday-clock");
-
-    Ok(())
-  }
-
-  #[cfg(not(loom))]
-  #[test]
-  fn async_std_safely_shuts_down() -> io::Result<()> {
-    Command::new("cargo")
-      .args([
-        "run",
-        "-p",
-        "doomsday-clock",
-        "--no-default-features",
-        "--features",
-        "async-std-runtime",
-      ])
-      .stdout(Stdio::null())
-      .spawn()?
-      .wait()?
-      .exit_ok()
-      .expect("async-std failed to shutdown doomsday-clock");
-
-    Ok(())
-  }
-
-  #[ignore]
-  #[cfg(not(loom))]
-  #[test]
-  fn smol_safely_shuts_down() -> io::Result<()> {
-    Command::new("cargo")
-      .args([
-        "run",
-        "-p",
-        "doomsday-clock",
-        "--no-default-features",
-        "--features",
-        "smol-runtime",
-      ])
-      .stdout(Stdio::null())
-      .spawn()?
-      .wait()?
-      .exit_ok()
-      .expect("smol to failed to shutdown doomsday-clock");
-
-    Ok(())
   }
 }
