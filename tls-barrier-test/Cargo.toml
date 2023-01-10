@@ -1,5 +1,5 @@
 [package]
-name = "tls-validity-check"
+name = "tls-barrier-test"
 authors = ["Thomas Sieverding <Thomas@bajix.com>"]
 edition = "2021"
 version = "0.0.1"
@@ -9,7 +9,7 @@ repository = "https://github.com/Bajix/async-local/"
 publish = false
 
 [[bin]]
-name = "tls-validity-check"
+name = "tls-barrier-test"
 doctest = false
 bench = false
 test = false

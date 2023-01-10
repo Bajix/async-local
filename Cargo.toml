@@ -43,7 +43,7 @@ members = [
   "derive-async-local",
   "doomsday-clock",
   "shutdown-barrier",
-  "tls-validity-check",
+  "tls-barrier-test",
 ]
 
 [profile.release]
