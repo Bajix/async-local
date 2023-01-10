@@ -2,7 +2,7 @@
 authors = ["Thomas Sieverding <Thomas@bajix.com>"]
 edition = "2021"
 name = "async-local"
-version = "0.9.0"
+version = "0.10.0"
 description = "For safely extending the lifetime of thread locals"
 readme = "./README.md"
 license = "MIT"
@@ -11,7 +11,7 @@ repository = "https://github.com/Bajix/async-local/"
 [dependencies]
 async_t = "0.7"
 async-std = { version = "1", features = ["attributes"], optional = true }
-derive-async-local = { version = "0.9.0", path = "./derive-async-local" }
+derive-async-local = { version = "0.10.0", path = "./derive-async-local" }
 shutdown-barrier = { version = "3", path = "./shutdown-barrier" }
 static_assertions = "1.1"
 tokio = { version = "1", features = [
