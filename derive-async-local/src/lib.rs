@@ -130,9 +130,6 @@ pub fn derive_as_context(input: proc_macro::TokenStream) -> proc_macro::TokenStr
     unsafe impl #impl_generics async_local::AsContext for #ident #ty_generics #where_clause {
       type Target = #ref_type;
     }
-
-    // Assert type doesn't impl Drop as otherwise shutdown barrier cannot suspend deallocation
-    async_local::static_assertions::const_assert_eq!(std::mem::needs_drop::<#ident>(), false);
   );
 
   expanded.into()

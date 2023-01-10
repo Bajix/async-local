@@ -9,9 +9,6 @@ assert_cfg!(not(all(
 
 extern crate self as async_local;
 
-#[doc(hidden)]
-pub extern crate static_assertions;
-
 #[cfg(not(loom))]
 use std::thread::LocalKey;
 use std::{future::Future, marker::PhantomData, ops::Deref, ptr::addr_of};
@@ -74,7 +71,7 @@ where
   }
 }
 
-/// A marker trait promising that [AsRef](https://doc.rust-lang.org/std/convert/trait.AsRef.html)<[`Context<T>`]> is implemented in a way that can't be invalidated
+/// A marker trait promising that [AsRef](https://doc.rust-lang.org/std/convert/trait.AsRef.html)<[`Context<T>`]> is implemented in a way that can't be invalidated and that Self doesn't impl [std::ops::Drop]
 ///
 /// # Safety
 ///
@@ -304,10 +301,18 @@ where
   }
 
   unsafe fn local_ref(&'static self) -> LocalRef<T::Target> {
+    debug_assert!(
+      !std::mem::needs_drop::<T>(),
+      "AsyncLocal cannot be used with types that impl std::ops::Drop"
+    );
     self.with(|value| LocalRef::new(value.as_ref()))
   }
 
   unsafe fn guarded_ref<'a>(&'static self) -> RefGuard<'a, T::Target> {
+    debug_assert!(
+      !std::mem::needs_drop::<T>(),
+      "AsyncLocal cannot be used with types that impl std::ops::Drop"
+    );
     self.with(|value| RefGuard::new(value.as_ref()))
   }
 }
