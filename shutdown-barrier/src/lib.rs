@@ -158,35 +158,6 @@ pub fn guard_thread_shutdown() {
   });
 }
 
-/// Suspend the current thread until all guarded threads rendezvous during shutdown. A thread will be suspended at most once this way and only if previously guarded by [`guard_thread_shutdown`]
-///
-/// # Example
-///
-/// ```rust
-/// pub struct Context<T: Sync>(T);
-///
-/// impl<T> Drop for Context<T>
-/// where
-///   T: Sync,
-/// {
-///   fn drop(&mut self) {
-///     // By blocking here we ensure T cannot be deallocated until all guarded threads rendezvous while destroying thread local data
-///     suspend_until_shutdown();
-///   }
-/// }
-///
-/// thread_local! {
-///   static COUNTER: Context<AtomicUsize> = Context::new(AtomicUsize::new(0));
-/// }
-/// ```
-pub fn suspend_until_shutdown() {
-  SHUTDOWN_GUARD
-    .try_with(|guard| unsafe {
-      guard.rendezvous();
-    })
-    .ok();
-}
-
 #[cfg(all(test, loom))]
 mod tests {
   use loom::thread;

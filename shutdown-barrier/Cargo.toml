@@ -2,8 +2,8 @@
 name = "shutdown-barrier"
 authors = ["Thomas Sieverding <Thomas@bajix.com>"]
 edition = "2021"
-version = "2.0.0"
-description = "Runtime shutdown barrier for synchronizing TLS destructors"
+version = "3.0.0"
+description = "Runtime shutdown barrier for synchronizing TLS destruction"
 readme = "./README.md"
 license = "MIT"
 repository = "https://github.com/Bajix/async-local/"
