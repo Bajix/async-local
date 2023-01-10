@@ -34,7 +34,11 @@ where
   ///
   /// # Usage
   ///
-  /// Either wrap a type with Context and assign to a thread-local, or use as an unwrapped field in a struct that derives [AsContext].
+  /// Either wrap a type with Context and assign to a thread-local, or use as an unwrapped field in a struct that derives [`AsContext`]
+  /// 
+  /// # Safety
+  /// 
+  /// Types that use [`Context`] must not impl [`std::ops::Drop`] because doing so results in the [`thread_local`] macro registering destructor functions that cannot be deferred by blocking with [`std::sync::Condvar`]
   ///
   /// # Example
   ///
@@ -230,7 +234,7 @@ where
     F: FnOnce(RefGuard<'async_trait, T::Target>) -> Fut + Send,
     Fut: Future<Output = R> + Send;
 
-  /// A wrapper around spawn_blocking that guards [`Context`] drops for the lifetime of the blocking thread
+  /// A wrapper around spawn_blocking that appropriately constrains the lifetime of [`RefGuard`]
   ///
   /// Use the `tokio-runtime` feature flag for [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) or `async-std-runtime` for [`async_std::task::spawn_blocking`](https://docs.rs/async-std/latest/async_std/task/fn.spawn_blocking.html)
   #[cfg_attr(
@@ -249,24 +253,20 @@ where
   ///
   /// The **only** safe way to use [`LocalRef`] is within the context of an async runtime:
   ///
-  /// - ensure that [`LocalRef`] can only refer to a thread local within the context of an async runtime by creating within an async context such as [`tokio::spawn`](https://docs.rs/tokio/latest/tokio/fn.spawn.html), [`std::future::Future::poll`], an async fn or block or within the drop of a pinned [`std::future::Future`] that created [`LocalRef`] prior while pinned and polling.
+  /// - ensure that [`LocalRef`] refers only to thread locals owned by runtime worker threads by creating within an async context such as [`tokio::spawn`](https://docs.rs/tokio/latest/tokio/fn.spawn.html), [`std::future::Future::poll`], an async fn/block or within the [`Drop`] of a pinned [`std::future::Future`] that created [`LocalRef`] prior while pinned and polling.
   ///
-  /// - ensure that a move into [`std::thread`] cannot occur or otherwise that [`LocalRef`] cannot be created nor derefenced outside of an async context by constraining use exclusively to within a pinned [`std::future::Future`] being polled or dropped and otherwise using [`RefGuard`] explicitly over any non-`'static` lifetime such as `'async_trait` to allow more flexible usage combined with async traits
-  ///
-  /// - validly created [`LocalRef`] can be moved into blocking threads spawned by [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) and [`async_std::task::spawn_blocking`](https://docs.rs/async-std/latest/async_std/task/fn.spawn_blocking.html)
+  /// - ensure that moves into [`std::thread`] cannot occur unless managed by [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) or [`async_std::task::spawn_blocking`](https://docs.rs/async-std/latest/async_std/task/fn.spawn_blocking.html)
   unsafe fn local_ref(&'static self) -> LocalRef<T::Target>;
 
   /// Create a lifetime-constrained thread-safe pointer to a thread local [`Context`]
   ///
   /// # Safety
   ///
-  /// The **only** safe way to use [`RefGuard`] is within the context of an async runtime
+  /// The **only** safe way to use [`RefGuard`] is within the context of an async runtime:
   ///
-  /// The well-known way of safely accomplishing these guarantees is to:
+  /// - ensure that [`RefGuard`] can only refer to thread locals owned by runtime worker threads by runtime worker threads by creating within an async context such as [`tokio::spawn`](https://docs.rs/tokio/latest/tokio/fn.spawn.html), [`std::future::Future::poll`], or an async fn/block or within the [`Drop`] of a pinned [`std::future::Future`] that created [`RefGuard`] prior while pinned and polling.
   ///
-  /// 1) ensure that [`RefGuard`] can only refer to a thread local within the context of the async runtime by creating within an async context such as [`tokio::spawn`](https://docs.rs/tokio/latest/tokio/fn.spawn.html), [`std::future::Future::poll`], or an async fn or block or within the drop of a pinned [`std::future::Future`] that created [`RefGuard`] prior while pinned and polling.
-  ///
-  /// 2) Use borrows of any non-`'static` lifetime such as`'async_trait` as a way of constraining the lifetime and preventing [`RefGuard`] from being movable into a blocking thread.
+  /// - Use borrows of any non-`'static` lifetime such as `'async_trait` as a way of contraining the lifetime as to prevent [`RefGuard`] from being freely movable into blocking threads. Runtime managed threads spawned by [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) or [`async_std::task::spawn_blocking`](https://docs.rs/async-std/latest/async_std/task/fn.spawn_blocking.html) can be safely used by re-assigning lifetimes with [`std::mem::transmute`]
   unsafe fn guarded_ref<'a>(&'static self) -> RefGuard<'a, T::Target>;
 }
 
@@ -303,7 +303,7 @@ where
   unsafe fn local_ref(&'static self) -> LocalRef<T::Target> {
     debug_assert!(
       !std::mem::needs_drop::<T>(),
-      "AsyncLocal cannot be used with types that impl std::ops::Drop"
+      "AsyncLocal cannot be used with thread locals types that impl std::ops::Drop"
     );
     self.with(|value| LocalRef::new(value.as_ref()))
   }
@@ -311,7 +311,7 @@ where
   unsafe fn guarded_ref<'a>(&'static self) -> RefGuard<'a, T::Target> {
     debug_assert!(
       !std::mem::needs_drop::<T>(),
-      "AsyncLocal cannot be used with types that impl std::ops::Drop"
+      "AsyncLocal cannot be used with thread locals types that impl std::ops::Drop"
     );
     self.with(|value| RefGuard::new(value.as_ref()))
   }
