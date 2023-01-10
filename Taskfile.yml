@@ -14,7 +14,7 @@ tasks:
 
   doc:
     cmds:
-      - cargo +nightly doc -p async-local --open
+      - cargo +nightly doc -p async-local --open --features tokio-runtime
     env:
       RUSTDOCFLAGS: --cfg docsrs
 
