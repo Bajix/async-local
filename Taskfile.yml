@@ -12,6 +12,12 @@ tasks:
       - task: test-async-std
       - task: test-address-sanitizer
 
+  test-miri:
+    cmds:
+      - cargo miri test -Z build-std --target $TARGET --features tokio-runtime -- --nocapture
+    env:
+      MIRIFLAGS: -Zmiri-backtrace=full -Zmiri-disable-isolation
+
   doc:
     cmds:
       - cargo +nightly doc -p async-local --open --features tokio-runtime
