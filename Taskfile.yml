@@ -7,20 +7,17 @@ tasks:
   default:
     cmds:
       - task: clippy-tests
-      - task: test-barrier
-      - task: test-tokio
-      - task: test-async-std
       - task: test-address-sanitizer
 
   test-miri:
     cmds:
-      - cargo miri test -Z build-std --target $TARGET --features tokio-runtime -- --nocapture
+      - cargo miri test -Z build-std --target $TARGET -- --nocapture
     env:
       MIRIFLAGS: -Zmiri-backtrace=full -Zmiri-disable-isolation
 
   doc:
     cmds:
-      - cargo +nightly doc -p async-local --open --features tokio-runtime
+      - cargo +nightly doc -p async-local --open
     env:
       RUSTDOCFLAGS: --cfg docsrs
 
@@ -44,22 +41,8 @@ tasks:
     env:
       RUSTFLAGS: --cfg loom
 
-  test-async-std:
-    cmds:
-      - cargo test -p async-local --features async-std-runtime -- --nocapture
-
-  test-tokio:
-    cmds:
-      - cargo test -p async-local --features tokio-runtime -- --nocapture
-
-  test-barrier:
-    cmds:
-      - cargo test -p shutdown-barrier -- --nocapture
-    env:
-      RUSTFLAGS: --cfg loom
-
   test-address-sanitizer:
     cmds:
-      - cargo test -Z build-std --target $TARGET --features tokio-runtime -- --nocapture
+      - cargo test -Z build-std --target $TARGET -- --nocapture
     ev:
       RUSTFLAGS: -Z sanitizer=address

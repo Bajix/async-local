@@ -10,15 +10,12 @@ repository = "https://github.com/Bajix/async-local/"
 
 [dependencies]
 async_t = "0.7"
-async-std = { version = "1", features = ["attributes"], optional = true }
+num_cpus = "1"
 derive-async-local = { version = "0.11.1", path = "./derive-async-local" }
-shutdown-barrier = { version = "3", path = "./shutdown-barrier" }
-static_assertions = "1.1"
 tokio = { version = "1", features = [
   "macros",
-  "rt-multi-thread",
   "rt",
-], optional = true }
+] }
 
 [target.'cfg(loom)'.dependencies]
 loom = { version = "0.5", features = [] }
@@ -28,17 +25,14 @@ doctest = false
 bench = false
 
 [features]
-default = []
+default = ["rt-multi-thread"]
 # This crate conditionally makes use of the nightly only feature [type_alias_impl_trait](https://rust-lang.github.io/rfcs/2515-type_alias_impl_trait.html) to allow [AsyncLocal::with_async](https://docs.rs/async-local/latest/async_local/trait.AsyncLocal.html#tymethod.with_async) to be unboxed. To compile on `stable` the `boxed` feature flag can be used to downgrade [async_t::async_trait](https://docs.rs/async_t/latest/async_t/attr.async_trait.html) to [async_trait::async_trait](https://docs.rs/async-trait/latest/async_trait).
 boxed = ["async_t/boxed"]
-tokio-runtime = ["tokio"]
-async-std-runtime = ["async-std"]
+rt-multi-thread = ["tokio/rt-multi-thread"]
 
 [workspace]
 members = [
-  "derive-async-local",
-  "shutdown-barrier",
-  "tls-barrier-test",
+  "derive-async-local"
 ]
 
 [profile.release]
@@ -47,6 +41,6 @@ opt-level = 3
 codegen-units = 1
 
 [package.metadata.docs.rs]
-features = ["tokio-runtime"]
+features = []
 all-features = false
 rustdoc-args = ["--cfg", "docsrs"]
