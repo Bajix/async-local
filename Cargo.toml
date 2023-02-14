@@ -2,23 +2,21 @@
 authors = ["Thomas Sieverding <Thomas@bajix.com>"]
 edition = "2021"
 name = "async-local"
-version = "0.12.1"
+version = "0.13.0"
 description = "For safely extending the lifetime of thread locals"
 readme = "./README.md"
 license = "MIT"
 repository = "https://github.com/Bajix/async-local/"
 
 [dependencies]
-derive-async-local = { version = "0.12.0", path = "./derive-async-local" }
+derive-async-local = { version = "0.13.0", path = "./derive-async-local" }
 num_cpus = "1"
 pin-project = "1"
-tokio = { version = "1", features = [
-  "macros",
-  "rt",
-] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread"], optional = true }
 
 [dev-dependencies]
 async-trait = "0.1.64"
+tokio = { version = "1", features = ["macros"] }
 
 [target.'cfg(loom)'.dependencies]
 loom = { version = "0.5", features = [] }
@@ -28,13 +26,14 @@ doctest = false
 bench = false
 
 [features]
-default = ["rt-multi-thread"]
-rt-multi-thread = ["tokio/rt-multi-thread"]
+default = ["barrier-protected-runtime", "leaky-context"]
+# Compatibilty flag that makes Context<T> substitute Box::leak instead of relying the internal barrier-protected Runtime to ensure tasks never outlive runtime worker owned thread local data by rendezvousing during shutdown
+leaky-context = []
+# Tokio Runtime configured with a barrier-synchronized shutdown as to ensure tasks never outlive worker thread owned local data
+barrier-protected-runtime = ["tokio"]
 
 [workspace]
-members = [
-  "derive-async-local"
-]
+members = ["derive-async-local"]
 
 [profile.release]
 lto = "fat"
@@ -42,6 +41,6 @@ opt-level = 3
 codegen-units = 1
 
 [package.metadata.docs.rs]
-features = []
-all-features = true
+features = ["barrier-protected-runtime"]
+all-features = false
 rustdoc-args = ["--cfg", "docsrs"]

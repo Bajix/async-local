@@ -6,32 +6,36 @@ env:
 tasks:
   default:
     cmds:
+      - task: test
       - task: clippy-tests
       - task: test-address-sanitizer
 
+  test:
+    cmds:
+      - cargo test --no-default-features --features barrier-protected-runtime -- --nocapture
+
   test-miri:
     cmds:
-      - cargo miri test -Z build-std --target $TARGET -- --nocapture
+      - cargo miri test -Z build-std --target $TARGET --no-default-features --features barrier-protected-runtime -- --nocapture
     env:
       MIRIFLAGS: -Zmiri-backtrace=full -Zmiri-disable-isolation
 
   doc:
     cmds:
-      - cargo +nightly doc -p async-local --open
+      - cargo +nightly doc -p async-local --open --no-default-features --features barrier-protected-runtime
     env:
       RUSTDOCFLAGS: --cfg docsrs
 
   clippy-tests:
     cmds:
-      - cargo clippy --tests
+      - cargo clippy --tests --no-default-features --features barrier-protected-runtime
 
   check-tests:
     cmds:
-      - cargo check --tests
-
+      - cargo check --tests --no-default-features --features barrier-protected-runtime
 
   test-address-sanitizer:
     cmds:
-      - cargo test -Z build-std --target $TARGET -- --nocapture
+      - cargo test -Z build-std --target $TARGET --no-default-features --features barrier-protected-runtime -- --nocapture
     ev:
       RUSTFLAGS: -Z sanitizer=address

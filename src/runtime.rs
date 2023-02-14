@@ -31,7 +31,6 @@ thread_local! {
 #[derive(PartialEq, Eq)]
 pub(crate) enum Kind {
   CurrentThread,
-  #[cfg(feature = "rt-multi-thread")]
   MultiThread,
 }
 
@@ -52,8 +51,6 @@ impl Builder {
     }
   }
 
-  #[cfg(feature = "rt-multi-thread")]
-  #[cfg_attr(docsrs, doc(cfg(feature = "rt-multi-thread")))]
   /// Returns a new builder with the multi thread scheduler selected.
   pub fn new_multi_thread() -> Builder {
     let worker_threads = std::env::var("TOKIO_WORKER_THEADS")

@@ -1,11 +1,12 @@
 #![cfg_attr(test, feature(exit_status_error))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-/// A barrier protected Tokio Runtime
-#[cfg(not(loom))]
-pub mod runtime;
-
 extern crate self as async_local;
+
+/// A Tokio Runtime builder configured with a shutdown barrier that makes worker threads rendezvous during shutdown as to ensure tasks never outlive worker thread owned local data
+#[cfg(all(not(loom), feature = "barrier-protected-runtime"))]
+#[cfg_attr(docsrs, doc(cfg(feature = "barrier-protected-runtime")))]
+pub mod runtime;
 
 #[cfg(not(loom))]
 use std::thread::LocalKey;
@@ -19,19 +20,24 @@ pub use derive_async_local::AsContext;
 use loom::thread::LocalKey;
 use pin_project::pin_project;
 #[doc(hidden)]
-#[cfg(not(loom))]
+#[cfg(all(not(loom), feature = "barrier-protected-runtime"))]
 pub use tokio::pin;
-#[cfg(not(loom))]
+#[cfg(all(not(loom), feature = "barrier-protected-runtime"))]
 use tokio::task::{spawn_blocking, JoinHandle};
 
 /// A wrapper type used for creating pointers to thread-locals
-pub struct Context<T: Sync>(T);
+pub struct Context<T: Sync + 'static>(
+  #[cfg(not(feature = "leaky-context"))] T,
+  #[cfg(feature = "leaky-context")] &'static T,
+);
 
 impl<T> Context<T>
 where
   T: Sync,
 {
   /// Create a new thread-local context
+  ///
+  /// If the `leaky-context` feature flag is enabled, Context will use [`Box::leak`] to avoid T ever being deallocated instead of relying on the provided barrier-protected Tokio Runtime to ensure tasks never outlive thread local data owned by worker threads. This provides compatibility for whenever it's not well-known that the async runtime used is the Tokio Runtime configured by this crate.
   ///
   /// # Usage
   ///
@@ -48,8 +54,14 @@ where
   ///   static COUNTER: Context<AtomicUsize> = Context::new(AtomicUsize::new(0));
   /// }
   /// ```
+  #[cfg(not(feature = "leaky-context"))]
   pub fn new(inner: T) -> Context<T> {
     Context(inner)
+  }
+
+  #[cfg(feature = "leaky-context")]
+  pub fn new(inner: T) -> Context<T> {
+    Context(Box::leak(Box::new(inner)))
   }
 }
 
@@ -78,7 +90,7 @@ where
 ///
 /// Context must not be a type that can be invalidated as references may exist for the lifetime of the runtime.
 pub unsafe trait AsContext: AsRef<Context<Self::Target>> {
-  type Target: Sync;
+  type Target: Sync + 'static;
 }
 
 unsafe impl<T> AsContext for Context<T>
@@ -90,14 +102,20 @@ where
 
 /// A thread-safe pointer to a thread local [`Context`]
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub struct LocalRef<T: Sync + 'static>(*const Context<T>);
+pub struct LocalRef<T: Sync + 'static>(*const T);
 
 impl<T> LocalRef<T>
 where
   T: Sync + 'static,
 {
+  #[cfg(feature = "leaky-context")]
   unsafe fn new(context: &Context<T>) -> Self {
-    LocalRef(addr_of!(*context))
+    LocalRef(addr_of!(*context.0))
+  }
+
+  #[cfg(not(feature = "leaky-context"))]
+  unsafe fn new(context: &Context<T>) -> Self {
+    LocalRef(addr_of!(context.0))
   }
 
   /// # Safety
@@ -110,8 +128,8 @@ where
     }
   }
 
-  #[cfg(not(loom))]
-
+  #[cfg(all(not(loom), feature = "barrier-protected-runtime"))]
+  #[cfg_attr(docsrs, doc(cfg(feature = "barrier-protected-runtime")))]
   pub fn with_blocking<F, R>(self, f: F) -> JoinHandle<R>
   where
     F: for<'a> FnOnce(&'a LocalRef<T>) -> R + Send + 'static,
@@ -127,7 +145,7 @@ where
 {
   type Target = T;
   fn deref(&self) -> &Self::Target {
-    unsafe { (*self.0).deref() }
+    unsafe { &*self.0 }
   }
 }
 
@@ -148,7 +166,7 @@ unsafe impl<T> Sync for LocalRef<T> where T: Sync {}
 /// A thread-safe pointer to a thread-local [`Context`] constrained by a phantom lifetime
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct RefGuard<'a, T: Sync + 'static> {
-  inner: *const Context<T>,
+  inner: *const T,
   _marker: PhantomData<fn(&'a ()) -> &'a ()>,
 }
 
@@ -156,16 +174,25 @@ impl<'a, T> RefGuard<'a, T>
 where
   T: Sync + 'static,
 {
+  #[cfg(feature = "leaky-context")]
   unsafe fn new(context: &Context<T>) -> Self {
     RefGuard {
-      inner: addr_of!(*context),
+      inner: addr_of!(*context.0),
+      _marker: PhantomData,
+    }
+  }
+
+  #[cfg(not(feature = "leaky-context"))]
+  unsafe fn new(context: &Context<T>) -> Self {
+    RefGuard {
+      inner: addr_of!(context.0),
       _marker: PhantomData,
     }
   }
 
   /// A wrapper around [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) that protects [`RefGuard`] for the lifetime of the spawned thread
-  #[cfg(not(loom))]
-
+  #[cfg(all(not(loom), feature = "barrier-protected-runtime"))]
+  #[cfg_attr(docsrs, doc(cfg(feature = "barrier-protected-runtime")))]
   pub fn with_blocking<F, R>(self, f: F) -> JoinHandle<R>
   where
     F: for<'b> FnOnce(RefGuard<'b, T>) -> R + Send + 'static,
@@ -183,7 +210,7 @@ where
 {
   type Target = T;
   fn deref(&self) -> &Self::Target {
-    unsafe { (*self.inner).deref() }
+    unsafe { &*self.inner }
   }
 }
 
@@ -204,6 +231,7 @@ impl<'a, T> Copy for RefGuard<'a, T> where T: Sync + 'static {}
 unsafe impl<'a, T> Send for RefGuard<'a, T> where T: Sync {}
 unsafe impl<'a, T> Sync for RefGuard<'a, T> where T: Sync {}
 
+/// A Future with a reference to a thread local [`Context`] that's usable across await points
 #[pin_project(project = WithLocalProj, project_replace = WithLocalOwn)]
 pub enum WithLocal<T, F, R>
 where
@@ -265,9 +293,9 @@ where
   where
     F: for<'a> FnOnce(RefGuard<'a, T::Target>) -> Pin<Box<dyn Future<Output = R> + Send + 'a>>;
 
-  /// A wrapper around spawn_blocking that appropriately constrains the lifetime of [`RefGuard`]
-
-  #[cfg(not(loom))]
+  /// A wrapper around [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) that appropriately constrains the lifetime of [`RefGuard`]
+  #[cfg(all(not(loom), any(feature = "barrier-protected-runtime")))]
+  #[cfg_attr(docsrs, doc(cfg(feature = "barrier-protected-runtime")))]
   fn with_blocking<F, R>(&'static self, f: F) -> JoinHandle<R>
   where
     F: for<'a> FnOnce(RefGuard<'a, T::Target>) -> R + Send + 'static,
@@ -307,7 +335,8 @@ where
     WithLocal::Uninitialized { f, key: self }
   }
 
-  #[cfg(not(loom))]
+  #[cfg(all(not(loom), feature = "barrier-protected-runtime"))]
+  #[cfg_attr(docsrs, doc(cfg(feature = "barrier-protected-runtime")))]
   fn with_blocking<F, R>(&'static self, f: F) -> JoinHandle<R>
   where
     F: for<'a> FnOnce(RefGuard<'a, T::Target>) -> R + Send + 'static,
