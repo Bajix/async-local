@@ -2,6 +2,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 /// A barrier protected Tokio Runtime
+#[cfg(not(loom))]
 pub mod runtime;
 
 extern crate self as async_local;
@@ -18,7 +19,9 @@ pub use derive_async_local::AsContext;
 use loom::thread::LocalKey;
 use pin_project::pin_project;
 #[doc(hidden)]
+#[cfg(not(loom))]
 pub use tokio::pin;
+#[cfg(not(loom))]
 use tokio::task::{spawn_blocking, JoinHandle};
 
 /// A wrapper type used for creating pointers to thread-locals
@@ -107,6 +110,8 @@ where
     }
   }
 
+  #[cfg(not(loom))]
+
   pub fn with_blocking<F, R>(self, f: F) -> JoinHandle<R>
   where
     F: for<'a> FnOnce(&'a LocalRef<T>) -> R + Send + 'static,
@@ -159,6 +164,8 @@ where
   }
 
   /// A wrapper around [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) that protects [`RefGuard`] for the lifetime of the spawned thread
+  #[cfg(not(loom))]
+
   pub fn with_blocking<F, R>(self, f: F) -> JoinHandle<R>
   where
     F: for<'b> FnOnce(RefGuard<'b, T>) -> R + Send + 'static,
@@ -259,6 +266,8 @@ where
     F: for<'a> FnOnce(RefGuard<'a, T::Target>) -> Pin<Box<dyn Future<Output = R> + Send + 'a>>;
 
   /// A wrapper around spawn_blocking that appropriately constrains the lifetime of [`RefGuard`]
+
+  #[cfg(not(loom))]
   fn with_blocking<F, R>(&'static self, f: F) -> JoinHandle<R>
   where
     F: for<'a> FnOnce(RefGuard<'a, T::Target>) -> R + Send + 'static,
@@ -298,6 +307,7 @@ where
     WithLocal::Uninitialized { f, key: self }
   }
 
+  #[cfg(not(loom))]
   fn with_blocking<F, R>(&'static self, f: F) -> JoinHandle<R>
   where
     F: for<'a> FnOnce(RefGuard<'a, T::Target>) -> R + Send + 'static,

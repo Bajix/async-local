@@ -2,7 +2,7 @@
 authors = ["Thomas Sieverding <Thomas@bajix.com>"]
 edition = "2021"
 name = "async-local"
-version = "0.12.0"
+version = "0.12.1"
 description = "For safely extending the lifetime of thread locals"
 readme = "./README.md"
 license = "MIT"
