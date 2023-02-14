@@ -2,14 +2,14 @@
 authors = ["Thomas Sieverding <Thomas@bajix.com>"]
 edition = "2021"
 name = "async-local"
-version = "0.11.1"
+version = "0.12.0"
 description = "For safely extending the lifetime of thread locals"
 readme = "./README.md"
 license = "MIT"
 repository = "https://github.com/Bajix/async-local/"
 
 [dependencies]
-derive-async-local = { version = "0.11.1", path = "./derive-async-local" }
+derive-async-local = { version = "0.12.0", path = "./derive-async-local" }
 num_cpus = "1"
 pin-project = "1"
 tokio = { version = "1", features = [
@@ -43,5 +43,5 @@ codegen-units = 1
 
 [package.metadata.docs.rs]
 features = []
-all-features = false
+all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
