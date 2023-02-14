@@ -10,7 +10,8 @@ Traditionally the downside of thead-locals has been that usage is constrainted t
 
 ## Runtime Configuration
 
-In order for [async-local](https://docs.rs/async-local) to protect thread local data within an async context, the provided barrier-protected Tokio Runtime must be used to ensure tasks never outlive thread local data owned by worker threads. By default, this crate makes no assumptions about the runtime used, and comes with the `leaky-context` feature flag enabled which prevents `Context<T>` from ever deallocating by using Box::leak; to avoid this extra indirection, disable `leaky-context` and configure the runtime using the [tokio::main](https://docs.rs/tokio/latest/tokio/attr.main.html) or [tokio::test](https://docs.rs/tokio/latest/tokio/attr.test.html) macro with the `crate` attribute set to `async_local` while using the `barrier-protected-runtime` feature flag.
+In order for [async-local](https://docs.rs/async-local) to protect thread local data within an async context, the provided barrier-protected Tokio Runtime must be used to ensure tasks never outlive thread local data owned by worker threads. By default, this crate makes no assumptions about the runtime used, and comes with the `leaky-context` feature flag enabled which prevents [Context<T>](https://docs.rs/async-local/latest/async_local/struct.Context.html) from ever deallocating by using [Box::leak](https://doc.rust-lang.org/std/boxed/struct.Box.html#method.leak); to avoid this extra indirection, disable `leaky-context` and configure the runtime using the [tokio::main](https://docs.rs/tokio/latest/tokio/attr.main.html) or [tokio::test](https://docs.rs/tokio/latest/tokio/attr.test.html) macro with the `crate` attribute set to `async_local` while only the `barrier-protected-runtime` feature flag set on [`async-local`](https://docs.rs/async-local).
+
 
 ```rust
 #[cfg(test)]

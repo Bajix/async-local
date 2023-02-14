@@ -3,9 +3,20 @@
 
 extern crate self as async_local;
 
+assert_cfg!(all(
+  not(all(
+    feature = "barrier-protected-runtime",
+    feature = "leaky-context"
+  )),
+  any(
+    feature = "barrier-protected-runtime",
+    feature = "leaky-context",
+  )
+));
+
 /// A Tokio Runtime builder configured with a shutdown barrier that makes worker threads rendezvous during shutdown as to ensure tasks never outlive worker thread owned local data
-#[cfg(all(not(loom), feature = "barrier-protected-runtime"))]
-#[cfg_attr(docsrs, doc(cfg(feature = "barrier-protected-runtime")))]
+#[cfg(all(not(loom), feature = "tokio-runtime"))]
+#[cfg_attr(docsrs, doc(cfg(feature = "tokio-runtime")))]
 pub mod runtime;
 
 #[cfg(not(loom))]
@@ -19,10 +30,11 @@ pub use derive_async_local::AsContext;
 #[cfg(loom)]
 use loom::thread::LocalKey;
 use pin_project::pin_project;
+use static_assertions::assert_cfg;
 #[doc(hidden)]
-#[cfg(all(not(loom), feature = "barrier-protected-runtime"))]
+#[cfg(all(not(loom), feature = "tokio-runtime"))]
 pub use tokio::pin;
-#[cfg(all(not(loom), feature = "barrier-protected-runtime"))]
+#[cfg(all(not(loom), feature = "tokio-runtime"))]
 use tokio::task::{spawn_blocking, JoinHandle};
 
 /// A wrapper type used for creating pointers to thread-locals
@@ -128,8 +140,8 @@ where
     }
   }
 
-  #[cfg(all(not(loom), feature = "barrier-protected-runtime"))]
-  #[cfg_attr(docsrs, doc(cfg(feature = "barrier-protected-runtime")))]
+  #[cfg(all(not(loom), feature = "tokio-runtime"))]
+  #[cfg_attr(docsrs, doc(cfg(feature = "tokio-runtime")))]
   pub fn with_blocking<F, R>(self, f: F) -> JoinHandle<R>
   where
     F: for<'a> FnOnce(&'a LocalRef<T>) -> R + Send + 'static,
@@ -191,8 +203,8 @@ where
   }
 
   /// A wrapper around [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) that protects [`RefGuard`] for the lifetime of the spawned thread
-  #[cfg(all(not(loom), feature = "barrier-protected-runtime"))]
-  #[cfg_attr(docsrs, doc(cfg(feature = "barrier-protected-runtime")))]
+  #[cfg(all(not(loom), feature = "tokio-runtime"))]
+  #[cfg_attr(docsrs, doc(cfg(feature = "tokio-runtime")))]
   pub fn with_blocking<F, R>(self, f: F) -> JoinHandle<R>
   where
     F: for<'b> FnOnce(RefGuard<'b, T>) -> R + Send + 'static,
@@ -294,8 +306,8 @@ where
     F: for<'a> FnOnce(RefGuard<'a, T::Target>) -> Pin<Box<dyn Future<Output = R> + Send + 'a>>;
 
   /// A wrapper around [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) that appropriately constrains the lifetime of [`RefGuard`]
-  #[cfg(all(not(loom), any(feature = "barrier-protected-runtime")))]
-  #[cfg_attr(docsrs, doc(cfg(feature = "barrier-protected-runtime")))]
+  #[cfg(all(not(loom), any(feature = "tokio-runtime")))]
+  #[cfg_attr(docsrs, doc(cfg(feature = "tokio-runtime")))]
   fn with_blocking<F, R>(&'static self, f: F) -> JoinHandle<R>
   where
     F: for<'a> FnOnce(RefGuard<'a, T::Target>) -> R + Send + 'static,
@@ -335,8 +347,8 @@ where
     WithLocal::Uninitialized { f, key: self }
   }
 
-  #[cfg(all(not(loom), feature = "barrier-protected-runtime"))]
-  #[cfg_attr(docsrs, doc(cfg(feature = "barrier-protected-runtime")))]
+  #[cfg(all(not(loom), feature = "tokio-runtime"))]
+  #[cfg_attr(docsrs, doc(cfg(feature = "tokio-runtime")))]
   fn with_blocking<F, R>(&'static self, f: F) -> JoinHandle<R>
   where
     F: for<'a> FnOnce(RefGuard<'a, T::Target>) -> R + Send + 'static,
@@ -369,7 +381,6 @@ mod tests {
   }
 
   #[tokio::test(crate = "async_local", flavor = "multi_thread")]
-
   async fn with_blocking() {
     COUNTER
       .with_blocking(|counter| counter.fetch_add(1, Ordering::Relaxed))
@@ -392,7 +403,6 @@ mod tests {
   }
 
   #[tokio::test(crate = "async_local", flavor = "multi_thread")]
-
   async fn ref_spans_await() {
     let counter = unsafe { COUNTER.local_ref() };
     yield_now().await;
@@ -400,7 +410,6 @@ mod tests {
   }
 
   #[tokio::test(crate = "async_local", flavor = "multi_thread")]
-
   async fn with_async() {
     COUNTER
       .with_async(|counter| {
@@ -413,7 +422,6 @@ mod tests {
   }
 
   #[tokio::test(crate = "async_local", flavor = "multi_thread")]
-
   async fn bound_to_async_trait_lifetime() {
     struct Counter;
     #[async_trait::async_trait]
