@@ -1,4 +1,3 @@
-#![cfg_attr(not(feature = "boxed"), feature(type_alias_impl_trait))]
 #![cfg_attr(test, feature(exit_status_error))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
@@ -9,11 +8,15 @@ extern crate self as async_local;
 
 #[cfg(not(loom))]
 use std::thread::LocalKey;
-use std::{future::Future, marker::PhantomData, ops::Deref, ptr::addr_of};
+use std::{
+  future::Future, hint::unreachable_unchecked, marker::PhantomData, ops::Deref, pin::Pin,
+  ptr::addr_of, task::Poll,
+};
 
 pub use derive_async_local::AsContext;
 #[cfg(loom)]
 use loom::thread::LocalKey;
+use pin_project::pin_project;
 #[doc(hidden)]
 pub use tokio::pin;
 use tokio::task::{spawn_blocking, JoinHandle};
@@ -67,6 +70,10 @@ where
 }
 
 /// A marker trait promising that [AsRef](https://doc.rust-lang.org/std/convert/trait.AsRef.html)<[`Context<T>`]> is implemented in a way that can't be invalidated
+///
+/// # Safety
+///
+/// Context must not be a type that can be invalidated as references may exist for the lifetime of the runtime.
 pub unsafe trait AsContext: AsRef<Context<Self::Target>> {
   type Target: Sync;
 }
@@ -190,17 +197,66 @@ impl<'a, T> Copy for RefGuard<'a, T> where T: Sync + 'static {}
 unsafe impl<'a, T> Send for RefGuard<'a, T> where T: Sync {}
 unsafe impl<'a, T> Sync for RefGuard<'a, T> where T: Sync {}
 
+#[pin_project(project = WithLocalProj, project_replace = WithLocalOwn)]
+pub enum WithLocal<T, F, R>
+where
+  T: AsContext + 'static,
+  F: for<'a> FnOnce(RefGuard<'a, T::Target>) -> Pin<Box<dyn Future<Output = R> + Send + 'a>>,
+{
+  Uninitialized { f: F, key: &'static LocalKey<T> },
+  Initializing { _marker: PhantomData<R> },
+  Pending(#[pin] Pin<Box<dyn Future<Output = R> + Send>>),
+}
+
+impl<T, F, R> Future for WithLocal<T, F, R>
+where
+  T: AsContext,
+  F: for<'a> FnOnce(RefGuard<'a, T::Target>) -> Pin<Box<dyn Future<Output = R> + Send + 'a>>,
+{
+  type Output = R;
+
+  fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+    let inner = match self.as_mut().project() {
+      WithLocalProj::Uninitialized { f: _, key: _ } => {
+        match self.as_mut().project_replace(WithLocal::Initializing {
+          _marker: PhantomData,
+        }) {
+          WithLocalOwn::Uninitialized { f, key } => {
+            let guarded_ref = unsafe { key.guarded_ref() };
+            self
+              .as_mut()
+              .project_replace(WithLocal::Pending(f(guarded_ref)));
+            match self.as_mut().project() {
+              WithLocalProj::Pending(inner) => inner,
+              _ => unsafe {
+                unreachable_unchecked();
+              },
+            }
+          }
+          _ => unsafe {
+            unreachable_unchecked();
+          },
+        }
+      }
+      WithLocalProj::Initializing { _marker } => unsafe {
+        unreachable_unchecked();
+      },
+      WithLocalProj::Pending(inner) => inner,
+    };
+
+    inner.poll(cx)
+  }
+}
+
 /// LocalKey extension for creating thread-safe pointers to thread-local [`Context`]
-#[async_t::async_trait]
 pub trait AsyncLocal<T>
 where
-  T: 'static + AsContext,
+  T: AsContext,
 {
   /// The async counterpart of [LocalKey::with](https://doc.rust-lang.org/std/thread/struct.LocalKey.html#method.with)
-  async fn with_async<F, R, Fut>(&'static self, f: F) -> R
+  fn with_async<F, R>(&'static self, f: F) -> WithLocal<T, F, R>
   where
-    F: FnOnce(RefGuard<'async_trait, T::Target>) -> Fut + Send,
-    Fut: Future<Output = R> + Send;
+    F: for<'a> FnOnce(RefGuard<'a, T::Target>) -> Pin<Box<dyn Future<Output = R> + Send + 'a>>;
 
   /// A wrapper around spawn_blocking that appropriately constrains the lifetime of [`RefGuard`]
   fn with_blocking<F, R>(&'static self, f: F) -> JoinHandle<R>
@@ -227,23 +283,19 @@ where
   ///
   /// - ensure that [`RefGuard`] can only refer to thread locals owned by runtime worker threads by runtime worker threads by creating within an async context such as [`tokio::spawn`](https://docs.rs/tokio/latest/tokio/fn.spawn.html), [`std::future::Future::poll`], or an async fn/block or within the [`Drop`] of a pinned [`std::future::Future`] that created [`RefGuard`] prior while pinned and polling.
   ///
-  /// - Use borrows of any non-`'static` lifetime such as `'async_trait` as a way of contraining the lifetime as to prevent [`RefGuard`] from being freely movable into blocking threads. Runtime managed threads spawned by [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) can be safely used by re-assigning lifetimes with [`std::mem::transmute`]
+  /// - Contrain to a non-'static lifetime as to prevent [`RefGuard`] from being freely movable into blocking threads. Runtime managed threads spawned by [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) can be safely used by re-assigning lifetimes with [`std::mem::transmute`]
   unsafe fn guarded_ref<'a>(&'static self) -> RefGuard<'a, T::Target>;
 }
 
-#[async_t::async_trait]
 impl<T> AsyncLocal<T> for LocalKey<T>
 where
-  T: AsContext + 'static,
+  T: AsContext,
 {
-  async fn with_async<F, R, Fut>(&'static self, f: F) -> R
+  fn with_async<F, R>(&'static self, f: F) -> WithLocal<T, F, R>
   where
-    F: FnOnce(RefGuard<'async_trait, T::Target>) -> Fut + Send,
-    Fut: Future<Output = R> + Send,
+    F: for<'a> FnOnce(RefGuard<'a, T::Target>) -> Pin<Box<dyn Future<Output = R> + Send + 'a>>,
   {
-    let local_ref = unsafe { self.guarded_ref() };
-
-    f(local_ref).await
+    WithLocal::Uninitialized { f, key: self }
   }
 
   fn with_blocking<F, R>(&'static self, f: F) -> JoinHandle<R>
@@ -340,9 +392,11 @@ mod tests {
 
   async fn with_async() {
     COUNTER
-      .with_async(|counter| async move {
-        yield_now().await;
-        counter.fetch_add(1, Ordering::Release);
+      .with_async(|counter| {
+        Box::pin(async move {
+          yield_now().await;
+          counter.fetch_add(1, Ordering::Release);
+        })
       })
       .await;
   }
@@ -352,13 +406,13 @@ mod tests {
 
   async fn bound_to_async_trait_lifetime() {
     struct Counter;
-    #[async_t::async_trait]
+    #[async_trait::async_trait]
     trait Countable {
       #[allow(clippy::needless_lifetimes)]
       async fn add_one(ref_guard: RefGuard<'async_trait, AtomicUsize>) -> usize;
     }
 
-    #[async_t::async_trait]
+    #[async_trait::async_trait]
     impl Countable for Counter {
       // Within this context, RefGuard cannot be moved into a blocking thread because of the `'async_trait` lifetime
       async fn add_one(counter: RefGuard<'async_trait, AtomicUsize>) -> usize {
