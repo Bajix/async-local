@@ -10,8 +10,7 @@ Traditionally the downside of thead-locals has been that usage is constrainted t
 
 ## Runtime Configuration
 
-In order for async-local to protect thread local data within an async context, a shutdown barrier must be configured when building the Runtime as to synchronize shutdown across all worker threads. To do so, simply use `#[tokio::main(crate = "async_local", flavor = "multi_thread")]` or `#[tokio::test(crate = "async_local", flavor = "multi_thread")]`
-
+In order for [async-local](https://docs.rs/async-local) to protect thread local data within an async context, a shutdown barrier must be configured when building the Runtime as to synchronize shutdown across all worker threads. To do so, simply use `#[tokio::main(crate = "async_local", flavor = "multi_thread")]` or `#[tokio::test(crate = "async_local", flavor = "multi_thread")]`
 
 ```rust
 #[cfg(all(test))]
