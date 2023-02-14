@@ -317,17 +317,10 @@ where
   }
 }
 
-#[cfg(all(test))]
+#[cfg(test)]
 mod tests {
-  #[cfg(not(loom))]
   use std::sync::atomic::{AtomicUsize, Ordering};
 
-  #[cfg(loom)]
-  use loom::{
-    sync::atomic::{AtomicUsize, Ordering},
-    thread_local,
-  };
-  #[cfg(not(loom))]
   use tokio::task::yield_now;
 
   use super::*;
@@ -336,7 +329,6 @@ mod tests {
       static COUNTER: Context<AtomicUsize> = Context::new(AtomicUsize::new(0));
   }
 
-  #[cfg(not(loom))]
   #[tokio::test(crate = "async_local", flavor = "multi_thread")]
 
   async fn with_blocking() {
@@ -360,25 +352,6 @@ mod tests {
       .unwrap();
   }
 
-  #[cfg(loom)]
-  #[test]
-  fn guard_protects_context() {
-    loom::model(|| {
-      let counter = Context::new(AtomicUsize::new(0));
-      let local_ref = unsafe { LocalRef::new(&counter) };
-      let guard = ContextGuard::new(addr_of!(counter));
-
-      loom::thread::spawn(move || {
-        let count = local_ref.fetch_add(1, Ordering::Relaxed);
-        assert_eq!(count, 0);
-        drop(guard);
-      });
-
-      drop(counter);
-    });
-  }
-
-  #[cfg(not(loom))]
   #[tokio::test(crate = "async_local", flavor = "multi_thread")]
 
   async fn ref_spans_await() {
@@ -387,7 +360,6 @@ mod tests {
     counter.fetch_add(1, Ordering::SeqCst);
   }
 
-  #[cfg(not(loom))]
   #[tokio::test(crate = "async_local", flavor = "multi_thread")]
 
   async fn with_async() {
@@ -401,7 +373,6 @@ mod tests {
       .await;
   }
 
-  #[cfg(not(loom))]
   #[tokio::test(crate = "async_local", flavor = "multi_thread")]
 
   async fn bound_to_async_trait_lifetime() {

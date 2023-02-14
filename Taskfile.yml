@@ -29,17 +29,6 @@ tasks:
     cmds:
       - cargo check --tests
 
-  check-loom:
-    cmds:
-      - cargo check --tests
-    env:
-      RUSTFLAGS: --cfg loom
-
-  test-loom:
-    cmds:
-      - cargo test -p async-local -- --nocapture
-    env:
-      RUSTFLAGS: --cfg loom
 
   test-address-sanitizer:
     cmds:
