@@ -202,7 +202,7 @@ where
     }
   }
 
-  /// A wrapper around [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) that protects [`RefGuard`] for the lifetime of the spawned thread
+  /// A wrapper around [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) that safely extends and constrains the lifetime of [`RefGuard`]
   #[cfg(all(not(loom), feature = "tokio-runtime"))]
   #[cfg_attr(docsrs, doc(cfg(feature = "tokio-runtime")))]
   pub fn with_blocking<F, R>(self, f: F) -> JoinHandle<R>
@@ -305,7 +305,7 @@ where
   where
     F: for<'a> FnOnce(RefGuard<'a, T::Target>) -> Pin<Box<dyn Future<Output = R> + Send + 'a>>;
 
-  /// A wrapper around [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) that appropriately constrains the lifetime of [`RefGuard`]
+  /// A wrapper around [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) that safely extends and constrains the lifetime of [`RefGuard`]
   #[cfg(all(not(loom), any(feature = "tokio-runtime")))]
   #[cfg_attr(docsrs, doc(cfg(feature = "tokio-runtime")))]
   fn with_blocking<F, R>(&'static self, f: F) -> JoinHandle<R>
@@ -321,7 +321,7 @@ where
   ///
   /// - ensure that [`LocalRef`] refers only to thread locals owned by runtime worker threads by creating within an async context such as [`tokio::spawn`](https://docs.rs/tokio/latest/tokio/fn.spawn.html), [`std::future::Future::poll`], an async fn/block or within the [`Drop`] of a pinned [`std::future::Future`] that created [`LocalRef`] prior while pinned and polling.
   ///
-  /// - ensure that moves into [`std::thread`] cannot occur unless managed by [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html)
+  /// - ensure that moves into [`std::thread`] cannot occur unless managed by [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) and constrained therein
   unsafe fn local_ref(&'static self) -> LocalRef<T::Target>;
 
   /// Create a lifetime-constrained thread-safe pointer to a thread local [`Context`]
@@ -332,7 +332,15 @@ where
   ///
   /// - ensure that [`RefGuard`] can only refer to thread locals owned by runtime worker threads by runtime worker threads by creating within an async context such as [`tokio::spawn`](https://docs.rs/tokio/latest/tokio/fn.spawn.html), [`std::future::Future::poll`], or an async fn/block or within the [`Drop`] of a pinned [`std::future::Future`] that created [`RefGuard`] prior while pinned and polling.
   ///
-  /// - Contrain to a non-'static lifetime as to prevent [`RefGuard`] from being freely movable into blocking threads. Runtime managed threads spawned by [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) can be safely used by re-assigning lifetimes with [`std::mem::transmute`]
+  /// - constrain to a non-`'static` lifetime as to prevent [`RefGuard`] from being freely movable into blocking threads. Runtime managed threads spawned by [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) can be safely used by re-assigning lifetimes with [`std::mem::transmute`] and using Higher-Rank Trait Bounds
+  ///
+  /// - future returning closures must be boxed, pinned and generic over an arbitrary lifetime as expressed by using Higher-Rank Trait Bounds (see [HRTBs](https://doc.rust-lang.org/nomicon/hrtb.html)); other lifetimes will escape to `'static`
+  ///
+  /// ```rust
+  /// F: for<'a> FnOnce(RefGuard<'a, T::Target>) -> Pin<Box<dyn Future<Output = R> + Send + 'a>>
+  /// ```
+  ///
+  /// - for async trait fns using [`async_t`](https://crates.io/crates/async_t) or [`async_trait`](https://crates.io/crates/async-trait), the lifetime `'async_trait` is suitable to constrain [`RefGuard`] from escaping to `'static`
   unsafe fn guarded_ref<'a>(&'static self) -> RefGuard<'a, T::Target>;
 }
 
