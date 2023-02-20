@@ -126,6 +126,7 @@ impl Builder {
     self
   }
 
+  /// Creates a Tokio Runtime configured with a barrier that rendezvous worker threads during shutdown as to ensure tasks never outlive local data owned by worker threads
   pub fn build(&mut self) -> io::Result<Runtime> {
     let worker_threads = self.worker_threads;
     let barrier = Arc::new(ShutdownBarrier::default());
