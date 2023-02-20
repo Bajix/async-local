@@ -255,6 +255,16 @@ where
   Pending(#[pin] Pin<Box<dyn Future<Output = R> + Send>>),
 }
 
+impl<T, F, R> WithLocal<T, F, R>
+where
+  T: AsContext + 'static,
+  F: for<'a> FnOnce(RefGuard<'a, T::Target>) -> Pin<Box<dyn Future<Output = R> + Send + 'a>>,
+{
+  pub fn new(f: F, key: &'static LocalKey<T>) -> Self {
+    WithLocal::Uninitialized { f, key }
+  }
+}
+
 impl<T, F, R> Future for WithLocal<T, F, R>
 where
   T: AsContext,
@@ -352,7 +362,7 @@ where
   where
     F: for<'a> FnOnce(RefGuard<'a, T::Target>) -> Pin<Box<dyn Future<Output = R> + Send + 'a>>,
   {
-    WithLocal::Uninitialized { f, key: self }
+    WithLocal::new(f, self)
   }
 
   #[cfg(all(not(loom), feature = "tokio-runtime"))]
