@@ -38,10 +38,12 @@ pub use tokio::pin;
 use tokio::task::{spawn_blocking, JoinHandle};
 
 /// A wrapper type used for creating pointers to thread-locals
-pub struct Context<T: Sync + 'static>(
-  #[cfg(not(feature = "leaky-context"))] T,
-  #[cfg(feature = "leaky-context")] &'static T,
-);
+#[cfg(feature = "leaky-context")]
+pub struct Context<T: Sync + 'static>(&'static T);
+
+/// A wrapper type used for creating pointers to thread-locals
+#[cfg(not(feature = "leaky-context"))]
+pub struct Context<T: Sync + 'static>(T);
 
 impl<T> Context<T>
 where
