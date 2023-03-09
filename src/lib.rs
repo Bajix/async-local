@@ -88,6 +88,18 @@ where
   }
 }
 
+#[cfg(feature = "leaky-context")]
+impl<T> Deref for Context<T>
+where
+  T: Sync,
+{
+  type Target = T;
+  fn deref(&self) -> &Self::Target {
+    self.0
+  }
+}
+
+#[cfg(not(feature = "leaky-context"))]
 impl<T> Deref for Context<T>
 where
   T: Sync,
