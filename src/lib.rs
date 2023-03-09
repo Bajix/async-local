@@ -16,7 +16,7 @@ assert_cfg!(all(
 
 /// A Tokio Runtime builder configured with a barrier that rendezvous worker threads during shutdown as to ensure tasks never outlive local data owned by worker threads
 #[cfg(all(not(loom), feature = "tokio-runtime"))]
-#[cfg_attr(docsrs, doc(cfg(feature = "tokio-runtime")))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "tokio-runtime", feature = "barrier-protected-runtime"))))]
 pub mod runtime;
 
 #[cfg(not(loom))]
@@ -51,11 +51,11 @@ where
 {
   /// Create a new thread-local context
   ///
-  /// If the `leaky-context` feature flag is enabled, Context will use [`Box::leak`] to avoid T ever being deallocated instead of relying on the provided barrier-protected Tokio Runtime to ensure tasks never outlive thread local data owned by worker threads. This provides compatibility at the cost of performance for whenever it's not well-known that the async runtime used is the Tokio Runtime configured by this crate.
+  /// If the `leaky-context` feature flag is enabled, [`Context`] will use [`Box::leak`] to avoid `T` ever being deallocated instead of relying on the provided barrier-protected Tokio runtime to ensure tasks never outlive thread local data owned by worker threads. This provides compatibility at the cost of performance for whenever it's not well-known that the async runtime used is the Tokio [`runtime`] configured by this crate.
   ///
   /// # Usage
   ///
-  /// Either wrap a type with Context and assign to a thread-local, or use as an unwrapped field in a struct that derives [`AsContext`]
+  /// Either wrap a type with [`Context`] and assign to a thread-local, or use as an unwrapped field in a struct that derives [`AsContext`]
   ///
   /// # Example
   ///
