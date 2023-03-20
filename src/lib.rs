@@ -3,20 +3,12 @@
 
 extern crate self as async_local;
 
-assert_cfg!(all(
-  not(all(
-    feature = "barrier-protected-runtime",
-    feature = "leaky-context"
-  )),
-  any(
-    feature = "barrier-protected-runtime",
-    feature = "leaky-context",
-  )
-));
-
 /// A Tokio Runtime builder configured with a barrier that rendezvous worker threads during shutdown as to ensure tasks never outlive local data owned by worker threads
 #[cfg(all(not(loom), feature = "tokio-runtime"))]
-#[cfg_attr(docsrs, doc(cfg(any(feature = "tokio-runtime", feature = "barrier-protected-runtime"))))]
+#[cfg_attr(
+  docsrs,
+  doc(cfg(any(feature = "tokio-runtime", feature = "barrier-protected-runtime")))
+)]
 pub mod runtime;
 
 #[cfg(not(loom))]
@@ -30,7 +22,6 @@ pub use derive_async_local::AsContext;
 #[cfg(loom)]
 use loom::thread::LocalKey;
 use pin_project::pin_project;
-use static_assertions::assert_cfg;
 #[doc(hidden)]
 #[cfg(all(not(loom), feature = "tokio-runtime"))]
 pub use tokio::pin;
@@ -38,11 +29,11 @@ pub use tokio::pin;
 use tokio::task::{spawn_blocking, JoinHandle};
 
 /// A wrapper type used for creating pointers to thread-locals
-#[cfg(feature = "leaky-context")]
+#[cfg(not(feature = "barrier-protected-runtime"))]
 pub struct Context<T: Sync + 'static>(&'static T);
 
 /// A wrapper type used for creating pointers to thread-locals
-#[cfg(not(feature = "leaky-context"))]
+#[cfg(feature = "barrier-protected-runtime")]
 pub struct Context<T: Sync + 'static>(T);
 
 impl<T> Context<T>
@@ -51,7 +42,7 @@ where
 {
   /// Create a new thread-local context
   ///
-  /// If the `leaky-context` feature flag is enabled, [`Context`] will use [`Box::leak`] to avoid `T` ever being deallocated instead of relying on the provided barrier-protected Tokio runtime to ensure tasks never outlive thread local data owned by worker threads. This provides compatibility at the cost of performance for whenever it's not well-known that the async runtime used is the Tokio [`runtime`] configured by this crate.
+  /// If the `barrier-protected-runtime` feature flag isn't enabled, [`Context`] will use [`Box::leak`] to avoid `T` ever being deallocated instead of relying on the provided barrier-protected Tokio runtime to ensure tasks never outlive thread local data owned by worker threads. This provides compatibility at the cost of performance for whenever it's not well-known that the async runtime used is the Tokio [`runtime`] configured by this crate.
   ///
   /// # Usage
   ///
@@ -68,12 +59,12 @@ where
   ///   static COUNTER: Context<AtomicUsize> = Context::new(AtomicUsize::new(0));
   /// }
   /// ```
-  #[cfg(not(feature = "leaky-context"))]
+  #[cfg(feature = "barrier-protected-runtime")]
   pub fn new(inner: T) -> Context<T> {
     Context(inner)
   }
 
-  #[cfg(feature = "leaky-context")]
+  #[cfg(not(feature = "barrier-protected-runtime"))]
   pub fn new(inner: T) -> Context<T> {
     Context(Box::leak(Box::new(inner)))
   }
@@ -88,7 +79,7 @@ where
   }
 }
 
-#[cfg(feature = "leaky-context")]
+#[cfg(not(feature = "barrier-protected-runtime"))]
 impl<T> Deref for Context<T>
 where
   T: Sync,
@@ -99,7 +90,7 @@ where
   }
 }
 
-#[cfg(not(feature = "leaky-context"))]
+#[cfg(feature = "barrier-protected-runtime")]
 impl<T> Deref for Context<T>
 where
   T: Sync,
@@ -134,12 +125,12 @@ impl<T> LocalRef<T>
 where
   T: Sync + 'static,
 {
-  #[cfg(feature = "leaky-context")]
+  #[cfg(not(feature = "barrier-protected-runtime"))]
   unsafe fn new(context: &Context<T>) -> Self {
     LocalRef(addr_of!(*context.0))
   }
 
-  #[cfg(not(feature = "leaky-context"))]
+  #[cfg(feature = "barrier-protected-runtime")]
   unsafe fn new(context: &Context<T>) -> Self {
     LocalRef(addr_of!(context.0))
   }
@@ -204,7 +195,7 @@ impl<'a, T> RefGuard<'a, T>
 where
   T: Sync + 'static,
 {
-  #[cfg(feature = "leaky-context")]
+  #[cfg(not(feature = "barrier-protected-runtime"))]
   unsafe fn new(context: &Context<T>) -> Self {
     RefGuard {
       inner: addr_of!(*context.0),
@@ -212,7 +203,7 @@ where
     }
   }
 
-  #[cfg(not(feature = "leaky-context"))]
+  #[cfg(feature = "barrier-protected-runtime")]
   unsafe fn new(context: &Context<T>) -> Self {
     RefGuard {
       inner: addr_of!(context.0),

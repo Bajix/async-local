@@ -12,7 +12,6 @@ repository = "https://github.com/Bajix/async-local/"
 derive-async-local = { version = "1.0.0", path = "./derive-async-local" }
 num_cpus = "1"
 pin-project = "1"
-static_assertions = "1.1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread"], optional = true }
 
 [dev-dependencies]
@@ -27,13 +26,10 @@ doctest = false
 bench = false
 
 [features]
-default = ["tokio-runtime", "leaky-context"]
+default = ["tokio-runtime"]
 
 # Enable with_blocking to spawn blocking tasks onto the Tokio Runtime
 tokio-runtime = ["tokio"]
-
-# Compatibilty flag that makes Context<T> substitute Box::leak instead of relying the internal barrier-protected Runtime to ensure tasks never outlive runtime worker owned thread local data by rendezvousing during shutdown
-leaky-context = []
 
 # Tokio Runtime configured with a barrier-synchronized shutdown as to ensure tasks never outlive worker thread owned local data
 barrier-protected-runtime = ["tokio-runtime", "tokio/rt-multi-thread"]
@@ -47,5 +43,5 @@ opt-level = 3
 codegen-units = 1
 
 [package.metadata.docs.rs]
-all-features = false
+all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
