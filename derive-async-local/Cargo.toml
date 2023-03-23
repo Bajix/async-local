@@ -2,7 +2,7 @@
 name = "derive-async-local"
 authors = ["Thomas Sieverding <Thomas@bajix.com>"]
 edition = "2021"
-version = "1.1.1"
+version = "1.1.2"
 description = "Derives for async-local"
 readme = "./README.md"
 license = "MIT"
@@ -16,4 +16,4 @@ proc-macro = true
 [dependencies]
 proc-macro2 = "1"
 quote = "1"
-syn = { version = "1", features = ["derive"] }
+syn = { version = "2", features = ["derive"] }
