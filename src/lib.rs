@@ -68,6 +68,16 @@ where
   pub fn new(inner: T) -> Context<T> {
     Context(Box::leak(Box::new(inner)))
   }
+
+  /// An unchecked alternative to [`AsyncLocal::local_ref`]
+  pub unsafe fn local_ref(&self) -> LocalRef<T> {
+    LocalRef::new(self)
+  }
+
+  /// An unchecked alternative to [`AsyncLocal::guarded_ref`]
+  pub unsafe fn guarded_ref<'a>(&self) -> RefGuard<'a, T> {
+    RefGuard::new(self)
+  }
 }
 
 impl<T> AsRef<Context<T>> for Context<T>
