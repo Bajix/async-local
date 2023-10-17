@@ -13,15 +13,12 @@ pub mod runtime;
 
 #[cfg(not(loom))]
 use std::thread::LocalKey;
-use std::{
-  future::Future, hint::unreachable_unchecked, marker::PhantomData, ops::Deref, pin::Pin,
-  ptr::addr_of, task::Poll,
-};
+use std::{ops::Deref, ptr::addr_of};
 
 pub use derive_async_local::AsContext;
+use generativity::{Guard, Id};
 #[cfg(loom)]
 use loom::thread::LocalKey;
-use pin_project::pin_project;
 #[doc(hidden)]
 #[cfg(all(not(loom), feature = "tokio-runtime"))]
 pub use tokio::pin;
@@ -69,14 +66,13 @@ where
     Context(Box::leak(Box::new(inner)))
   }
 
-  /// An unchecked alternative to [`AsyncLocal::local_ref`]
-  pub unsafe fn local_ref(&self) -> LocalRef<T> {
-    LocalRef::new(self)
-  }
-
-  /// An unchecked alternative to [`AsyncLocal::guarded_ref`]
-  pub unsafe fn guarded_ref<'a>(&self) -> RefGuard<'a, T> {
-    RefGuard::new(self)
+  /// Construct `LocalRef` with an unbounded lifetime.
+  ///
+  /// # Safety
+  ///
+  /// This lifetime must be restricted to avoid unsoundness
+  pub unsafe fn local_ref<'a>(&self) -> LocalRef<'a, T> {
+    LocalRef::new(self, Guard::new(Id::new()))
   }
 }
 
@@ -127,101 +123,35 @@ where
   type Target = T;
 }
 
-/// A thread-safe pointer to a thread local [`Context`]
+/// A thread-safe pointer to a thread-local [`Context`] constrained by a "[generative](https://crates.io/crates/generativity)" lifetime brand that is [invariant](https://doc.rust-lang.org/nomicon/subtyping.html#variance) over the lifetime parameter and cannot be coerced into `'static`
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub struct LocalRef<T: Sync + 'static>(*const T);
-
-impl<T> LocalRef<T>
-where
-  T: Sync + 'static,
-{
-  #[cfg(not(feature = "barrier-protected-runtime"))]
-  unsafe fn new(context: &Context<T>) -> Self {
-    LocalRef(addr_of!(*context.0))
-  }
-
-  #[cfg(feature = "barrier-protected-runtime")]
-  unsafe fn new(context: &Context<T>) -> Self {
-    LocalRef(addr_of!(context.0))
-  }
-
-  /// # Safety
-  ///
-  /// To ensure that it is not possible for [`RefGuard`] to be moved to a thread outside of the async runtime, this must be constrained to a non-`'static` lifetime
-  pub unsafe fn guarded_ref<'a>(&self) -> RefGuard<'a, T> {
-    RefGuard {
-      inner: self.0,
-      _marker: PhantomData,
-    }
-  }
-
-  /// A wrapper around [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) that safely extends and constrains the lifetime of [`LocalRef`]
-  #[cfg(all(not(loom), feature = "tokio-runtime"))]
-  #[cfg_attr(
-    docsrs,
-    doc(cfg(any(feature = "tokio-runtime", feature = "barrier-protected-runtime")))
-  )]
-  pub fn with_blocking<F, R>(self, f: F) -> JoinHandle<R>
-  where
-    F: for<'a> FnOnce(&'a LocalRef<T>) -> R + Send + 'static,
-    R: Send + 'static,
-  {
-    spawn_blocking(move || f(&self))
-  }
-}
-
-impl<T> Deref for LocalRef<T>
-where
-  T: Sync,
-{
-  type Target = T;
-  fn deref(&self) -> &Self::Target {
-    unsafe { &*self.0 }
-  }
-}
-
-impl<T> Clone for LocalRef<T>
-where
-  T: Sync + 'static,
-{
-  fn clone(&self) -> Self {
-    LocalRef(self.0)
-  }
-}
-
-impl<T> Copy for LocalRef<T> where T: Sync + 'static {}
-
-unsafe impl<T> Send for LocalRef<T> where T: Sync {}
-unsafe impl<T> Sync for LocalRef<T> where T: Sync {}
-
-/// A thread-safe pointer to a thread-local [`Context`] constrained by a phantom lifetime
-#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub struct RefGuard<'a, T: Sync + 'static> {
+pub struct LocalRef<'id, T: Sync + 'static> {
   inner: *const T,
-  _marker: PhantomData<fn(&'a ()) -> &'a ()>,
+  /// Lifetime carrier
+  _brand: Id<'id>,
 }
 
-impl<'a, T> RefGuard<'a, T>
+impl<'id, T> LocalRef<'id, T>
 where
   T: Sync + 'static,
 {
   #[cfg(not(feature = "barrier-protected-runtime"))]
-  unsafe fn new(context: &Context<T>) -> Self {
-    RefGuard {
+  unsafe fn new(context: &Context<T>, guard: Guard<'id>) -> Self {
+    LocalRef {
       inner: addr_of!(*context.0),
-      _marker: PhantomData,
+      _brand: guard.into(),
     }
   }
 
   #[cfg(feature = "barrier-protected-runtime")]
-  unsafe fn new(context: &Context<T>) -> Self {
-    RefGuard {
+  unsafe fn new(context: &Context<T>, guard: Guard<'id>) -> Self {
+    LocalRef {
       inner: addr_of!(context.0),
-      _marker: PhantomData,
+      _brand: guard.into(),
     }
   }
 
-  /// A wrapper around [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) that safely extends and constrains the lifetime of [`RefGuard`]
+  /// A wrapper around [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) that safely constrains the lifetime of [`LocalRef`]
   #[cfg(all(not(loom), feature = "tokio-runtime"))]
   #[cfg_attr(
     docsrs,
@@ -229,16 +159,16 @@ where
   )]
   pub fn with_blocking<F, R>(self, f: F) -> JoinHandle<R>
   where
-    F: for<'b> FnOnce(RefGuard<'b, T>) -> R + Send + 'static,
+    F: for<'a> FnOnce(LocalRef<'a, T>) -> R + Send + 'static,
     R: Send + 'static,
   {
-    let ref_guard = unsafe { std::mem::transmute(self) };
+    let local_ref = unsafe { std::mem::transmute(self) };
 
-    spawn_blocking(move || f(ref_guard))
+    spawn_blocking(move || f(local_ref))
   }
 }
 
-impl<'a, T> Deref for RefGuard<'a, T>
+impl<'id, T> Deref for LocalRef<'id, T>
 where
   T: Sync,
 {
@@ -248,148 +178,25 @@ where
   }
 }
 
-impl<'a, T> Clone for RefGuard<'a, T>
+impl<'id, T> Clone for LocalRef<'id, T>
 where
   T: Sync + 'static,
 {
   fn clone(&self) -> Self {
-    RefGuard {
-      inner: self.inner,
-      _marker: PhantomData,
-    }
+    *self
   }
 }
 
-impl<'a, T> Copy for RefGuard<'a, T> where T: Sync + 'static {}
+impl<'id, T> Copy for LocalRef<'id, T> where T: Sync + 'static {}
 
-unsafe impl<'a, T> Send for RefGuard<'a, T> where T: Sync {}
-unsafe impl<'a, T> Sync for RefGuard<'a, T> where T: Sync {}
-
-/// A Future with a reference to a thread local [`Context`] that's usable across await points
-#[pin_project(project = WithLocalProj, project_replace = WithLocalOwn)]
-pub enum WithLocal<T, F, R>
-where
-  T: AsContext + 'static,
-  F: for<'a> FnOnce(RefGuard<'a, T::Target>) -> Pin<Box<dyn Future<Output = R> + Send + 'a>>,
-{
-  Uninitialized { f: F, key: &'static LocalKey<T> },
-  Initializing { _marker: PhantomData<R> },
-  Pending(#[pin] Pin<Box<dyn Future<Output = R> + Send>>),
-}
-
-impl<T, F, R> WithLocal<T, F, R>
-where
-  T: AsContext + 'static,
-  F: for<'a> FnOnce(RefGuard<'a, T::Target>) -> Pin<Box<dyn Future<Output = R> + Send + 'a>>,
-{
-  pub fn new(f: F, key: &'static LocalKey<T>) -> Self {
-    WithLocal::Uninitialized { f, key }
-  }
-}
-
-impl<T, F, R> Future for WithLocal<T, F, R>
-where
-  T: AsContext,
-  F: for<'a> FnOnce(RefGuard<'a, T::Target>) -> Pin<Box<dyn Future<Output = R> + Send + 'a>>,
-{
-  type Output = R;
-
-  fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
-    let inner = match self.as_mut().project() {
-      WithLocalProj::Uninitialized { f: _, key: _ } => {
-        match self.as_mut().project_replace(WithLocal::Initializing {
-          _marker: PhantomData,
-        }) {
-          WithLocalOwn::Uninitialized { f, key } => {
-            let guarded_ref = unsafe { key.guarded_ref() };
-            self
-              .as_mut()
-              .project_replace(WithLocal::Pending(f(guarded_ref)));
-            match self.as_mut().project() {
-              WithLocalProj::Pending(inner) => inner,
-              _ => unsafe {
-                unreachable_unchecked();
-              },
-            }
-          }
-          _ => unsafe {
-            unreachable_unchecked();
-          },
-        }
-      }
-      WithLocalProj::Initializing { _marker } => unsafe {
-        unreachable_unchecked();
-      },
-      WithLocalProj::Pending(inner) => inner,
-    };
-
-    inner.poll(cx)
-  }
-}
-
+unsafe impl<'id, T> Send for LocalRef<'id, T> where T: Sync {}
+unsafe impl<'id, T> Sync for LocalRef<'id, T> where T: Sync {}
 /// LocalKey extension for creating thread-safe pointers to thread-local [`Context`]
 pub trait AsyncLocal<T>
 where
   T: AsContext,
 {
-  /// The async counterpart of [LocalKey::with](https://doc.rust-lang.org/std/thread/struct.LocalKey.html#method.with)
-  fn with_async<F, R>(&'static self, f: F) -> WithLocal<T, F, R>
-  where
-    F: for<'a> FnOnce(RefGuard<'a, T::Target>) -> Pin<Box<dyn Future<Output = R> + Send + 'a>>;
-
-  /// A wrapper around [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) that safely extends and constrains the lifetime of [`RefGuard`]
-  #[cfg(all(not(loom), any(feature = "tokio-runtime")))]
-  #[cfg_attr(
-    docsrs,
-    doc(cfg(any(feature = "tokio-runtime", feature = "barrier-protected-runtime")))
-  )]
-  fn with_blocking<F, R>(&'static self, f: F) -> JoinHandle<R>
-  where
-    F: for<'a> FnOnce(RefGuard<'a, T::Target>) -> R + Send + 'static,
-    R: Send + 'static;
-
-  /// Create a thread-safe pointer to a thread local [`Context`]
-  ///
-  /// # Safety
-  ///
-  /// The **only** safe way to use [`LocalRef`] is within the context of a barrier-protected Tokio runtime:
-  ///
-  /// - ensure that [`LocalRef`] refers only to thread locals owned by runtime worker threads by creating within an async context such as [`tokio::spawn`](https://docs.rs/tokio/latest/tokio/fn.spawn.html), [`std::future::Future::poll`], an async fn/block or within the [`Drop`] of a pinned [`std::future::Future`] that created [`LocalRef`] prior while pinned and polling.
-  ///
-  /// - ensure that moves into [`std::thread`] cannot occur unless managed by [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) and constrained therein
-  unsafe fn local_ref(&'static self) -> LocalRef<T::Target>;
-
-  /// Create a lifetime-constrained thread-safe pointer to a thread local [`Context`]
-  ///
-  /// # Safety
-  ///
-  /// The **only** safe way to use [`RefGuard`] is within the context of a barrier-protected Tokio runtime:
-  ///
-  /// - ensure that [`RefGuard`] can only refer to thread locals owned by runtime worker threads by runtime worker threads by creating within an async context such as [`tokio::spawn`](https://docs.rs/tokio/latest/tokio/fn.spawn.html), [`std::future::Future::poll`], or an async fn/block or within the [`Drop`] of a pinned [`std::future::Future`] that created [`RefGuard`] prior while pinned and polling.
-  ///
-  /// - constrain to a non-`'static` lifetime as to prevent [`RefGuard`] from being freely movable into blocking threads. Runtime managed threads spawned by [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) can be safely used by re-assigning lifetimes with [`std::mem::transmute`]
-  ///
-  /// - closures can only adequately constrain the lifetime by using Higher-Rank Trait Bounds (see [HRTBs](https://doc.rust-lang.org/nomicon/hrtb.html)); futures returned must be boxed, pinned and generic over an arbitrary lifetime
-  ///
-  /// ```rust
-  /// F: for<'a> FnOnce(RefGuard<'a, T::Target>) -> Pin<Box<dyn Future<Output = R> + Send + 'a>>
-  /// ```
-  ///
-  /// - for async trait fns using [`async_t`](https://crates.io/crates/async_t) or [`async_trait`](https://crates.io/crates/async-trait), the lifetime `'async_trait` is suitable to constrain [`RefGuard`] from escaping to `'static`
-  unsafe fn guarded_ref<'a>(&'static self) -> RefGuard<'a, T::Target>;
-}
-
-impl<T> AsyncLocal<T> for LocalKey<T>
-where
-  T: AsContext,
-{
-  fn with_async<F, R>(&'static self, f: F) -> WithLocal<T, F, R>
-  where
-    F: for<'a> FnOnce(RefGuard<'a, T::Target>) -> Pin<Box<dyn Future<Output = R> + Send + 'a>>,
-  {
-    WithLocal::new(f, self)
-  }
-
+  /// A wrapper around [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) that safely constrains the lifetime of [`LocalRef`]
   #[cfg(all(not(loom), feature = "tokio-runtime"))]
   #[cfg_attr(
     docsrs,
@@ -397,20 +204,38 @@ where
   )]
   fn with_blocking<F, R>(&'static self, f: F) -> JoinHandle<R>
   where
-    F: for<'a> FnOnce(RefGuard<'a, T::Target>) -> R + Send + 'static,
+    F: for<'id> FnOnce(LocalRef<'id, T::Target>) -> R + Send + 'static,
+    R: Send + 'static;
+
+  /// Create a pointer to a thread local [`Context`] using a trusted lifetime carrier.
+  ///
+  /// # Usage
+  ///
+  /// Use [`generativity::make_guard`] to generate a unique [`invariant`](https://doc.rust-lang.org/nomicon/subtyping.html#variance) lifetime
+  fn local_ref<'id>(&'static self, guard: Guard<'id>) -> LocalRef<'id, T::Target>;
+}
+
+impl<T> AsyncLocal<T> for LocalKey<T>
+where
+  T: AsContext,
+{
+  #[cfg(all(not(loom), feature = "tokio-runtime"))]
+  #[cfg_attr(
+    docsrs,
+    doc(cfg(any(feature = "tokio-runtime", feature = "barrier-protected-runtime")))
+  )]
+  fn with_blocking<F, R>(&'static self, f: F) -> JoinHandle<R>
+  where
+    F: for<'id> FnOnce(LocalRef<'id, T::Target>) -> R + Send + 'static,
     R: Send + 'static,
   {
-    let guarded_ref = unsafe { self.guarded_ref() };
-
-    spawn_blocking(move || f(guarded_ref))
+    let guard = unsafe { Guard::new(Id::new()) };
+    let local_ref = self.local_ref(guard);
+    spawn_blocking(move || f(local_ref))
   }
 
-  unsafe fn local_ref(&'static self) -> LocalRef<T::Target> {
-    self.with(|value| LocalRef::new(value.as_ref()))
-  }
-
-  unsafe fn guarded_ref<'a>(&'static self) -> RefGuard<'a, T::Target> {
-    self.with(|value| RefGuard::new(value.as_ref()))
+  fn local_ref<'id>(&'static self, guard: Guard<'id>) -> LocalRef<'id, T::Target> {
+    self.with(|value| unsafe { LocalRef::new(value.as_ref(), guard) })
   }
 }
 
@@ -418,6 +243,7 @@ where
 mod tests {
   use std::sync::atomic::{AtomicUsize, Ordering};
 
+  use generativity::make_guard;
   use tokio::task::yield_now;
 
   use super::*;
@@ -433,14 +259,8 @@ mod tests {
       .await
       .unwrap();
 
-    let guarded_ref = unsafe { COUNTER.guarded_ref() };
-
-    guarded_ref
-      .with_blocking(|counter| counter.fetch_add(1, Ordering::Relaxed))
-      .await
-      .unwrap();
-
-    let local_ref = unsafe { COUNTER.local_ref() };
+    make_guard!(guard);
+    let local_ref = COUNTER.local_ref(guard);
 
     local_ref
       .with_blocking(|counter| counter.fetch_add(1, Ordering::Relaxed))
@@ -450,21 +270,10 @@ mod tests {
 
   #[tokio::test(crate = "async_local", flavor = "multi_thread")]
   async fn ref_spans_await() {
-    let counter = unsafe { COUNTER.local_ref() };
+    make_guard!(guard);
+    let counter = COUNTER.local_ref(guard);
     yield_now().await;
     counter.fetch_add(1, Ordering::SeqCst);
-  }
-
-  #[tokio::test(crate = "async_local", flavor = "multi_thread")]
-  async fn with_async() {
-    COUNTER
-      .with_async(|counter| {
-        Box::pin(async move {
-          yield_now().await;
-          counter.fetch_add(1, Ordering::Release);
-        })
-      })
-      .await;
   }
 
   #[tokio::test(crate = "async_local", flavor = "multi_thread")]
@@ -473,20 +282,19 @@ mod tests {
     #[async_trait::async_trait]
     trait Countable {
       #[allow(clippy::needless_lifetimes)]
-      async fn add_one(ref_guard: RefGuard<'async_trait, AtomicUsize>) -> usize;
+      async fn add_one(ref_guard: LocalRef<'async_trait, AtomicUsize>) -> usize;
     }
 
     #[async_trait::async_trait]
     impl Countable for Counter {
-      // Within this context, RefGuard cannot be moved into a blocking thread because of the `'async_trait` lifetime
-      async fn add_one(counter: RefGuard<'async_trait, AtomicUsize>) -> usize {
+      async fn add_one(counter: LocalRef<'async_trait, AtomicUsize>) -> usize {
         yield_now().await;
         counter.fetch_add(1, Ordering::Release)
       }
     }
 
-    // here outside of add_one the caller can arbitrarily make this of a `'static` lifetime and hence caution is needed
-    let counter = unsafe { COUNTER.guarded_ref() };
+    make_guard!(guard);
+    let counter = COUNTER.local_ref(guard);
 
     Counter::add_one(counter).await;
   }

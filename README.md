@@ -4,9 +4,9 @@
 [![Cargo](https://img.shields.io/crates/v/async-local.svg)](https://crates.io/crates/async-local)
 [![Documentation](https://docs.rs/async-local/badge.svg)](https://docs.rs/async-local)
 
-## Thread-safe pointers to thread-locals are possible
+## Unlocking the potential of thread-locals in an async context
 
-Traditionally the downside of thead-locals has been that usage is constrainted to the [LocalKey::with](https://doc.rust-lang.org/std/thread/struct.LocalKey.html#method.with) closure with no lifetime escapement, the rationale being that anything beyond this is of an indeterminate lifetime. There is however a way around this limitation: by using a barrier to rendezvous worker threads during runtime shutdown, no tasks will outlive thread local data belonging to any worker thread, and all pointers to thread locals created within an async context and held therein will be of a valid lifetime. Utilizing this barrier mechanism, this crate introduces [AsyncLocal::with_async](https://docs.rs/async-local/latest/async_local/trait.AsyncLocal.html#tymethod.with_async), the async counterpart of [LocalKey::with](https://doc.rust-lang.org/std/thread/struct.LocalKey.html#method.with), as well as the unsafe pointer types and safety considerations foundational for using thread local data within an async context.
+By using a barrier to rendezvous worker threads during runtime shutdown, it can be gauranteed that no task will outlive thread local data belonging to worker threads. With this, pointers to thread locals constrained by invariant lifetimes are guaranteed to be of a valid lifetime suitable for use accross await points. 
 
 ## Runtime Configuration (optional)
 
@@ -18,6 +18,8 @@ mod tests {
   use std::sync::atomic::{AtomicUsize, Ordering};
 
   use async_local::{AsyncLocal, Context};
+  use generativity::make_guard;
+  use tokio::task::yield_now;
 
   thread_local! {
       static COUNTER: Context<AtomicUsize> = Context::new(AtomicUsize::new(0));
@@ -25,13 +27,10 @@ mod tests {
 
   #[tokio::test(crate = "async_local", flavor = "multi_thread")]
   async fn it_increments() {
-    COUNTER
-      .with_async(|counter| {
-        Box::pin(async move {
-          counter.fetch_add(1, Ordering::Release);
-        })
-      })
-      .await;
+    make_guard!(guard);
+    let counter = COUNTER.local_ref(guard);
+    yield_now().await;
+    counter.fetch_add(1, Ordering::SeqCst);
   }
 }
 ```
