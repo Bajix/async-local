@@ -277,17 +277,16 @@ mod tests {
   }
 
   #[tokio::test(crate = "async_local", flavor = "multi_thread")]
-  async fn bound_to_async_trait_lifetime() {
+  async fn with_async_trait() {
     struct Counter;
     #[async_trait::async_trait]
     trait Countable {
-      #[allow(clippy::needless_lifetimes)]
-      async fn add_one(ref_guard: LocalRef<'async_trait, AtomicUsize>) -> usize;
+      async fn add_one(ref_guard: LocalRef<'_, AtomicUsize>) -> usize;
     }
 
     #[async_trait::async_trait]
     impl Countable for Counter {
-      async fn add_one(counter: LocalRef<'async_trait, AtomicUsize>) -> usize {
+      async fn add_one(counter: LocalRef<'_, AtomicUsize>) -> usize {
         yield_now().await;
         counter.fetch_add(1, Ordering::Release)
       }
