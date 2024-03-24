@@ -279,12 +279,11 @@ mod tests {
   #[tokio::test(crate = "async_local", flavor = "multi_thread")]
   async fn with_async_trait() {
     struct Counter;
-    #[async_trait::async_trait]
+
     trait Countable {
       async fn add_one(ref_guard: LocalRef<'_, AtomicUsize>) -> usize;
     }
 
-    #[async_trait::async_trait]
     impl Countable for Counter {
       async fn add_one(counter: LocalRef<'_, AtomicUsize>) -> usize {
         yield_now().await;
