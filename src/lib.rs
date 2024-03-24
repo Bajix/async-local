@@ -7,7 +7,7 @@ extern crate self as async_local;
 #[cfg(all(not(loom), feature = "tokio-runtime"))]
 #[cfg_attr(
   docsrs,
-  doc(cfg(any(feature = "tokio-runtime", feature = "barrier-protected-runtime")))
+  doc(cfg(any(feature = "barrier-protected-runtime")))
 )]
 pub mod runtime;
 
@@ -39,7 +39,7 @@ where
 {
   /// Create a new thread-local context
   ///
-  /// If the `barrier-protected-runtime` feature flag isn't enabled, [`Context`] will use [`Box::leak`] to avoid `T` ever being deallocated instead of relying on the provided barrier-protected Tokio runtime to ensure tasks never outlive thread local data owned by worker threads. This provides compatibility at the cost of performance for whenever it's not well-known that the async runtime used is the Tokio [`runtime`] configured by this crate.
+  /// If the `barrier-protected-runtime` feature flag isn't enabled, [`Context`] will use [`Box::leak`] to avoid `T` ever being deallocated instead of relying on the provided barrier-protected Tokio runtime to ensure tasks never outlive thread local data owned by worker threads. This provides soundness at the cost of performance for whenever it's not well-known that the async runtime used is the Tokio [`runtime`] configured by this crate.
   ///
   /// # Usage
   ///
@@ -66,7 +66,7 @@ where
     Context(Box::leak(Box::new(inner)))
   }
 
-  /// Construct `LocalRef` with an unbounded lifetime.
+  /// Construct [`LocalRef`] with an unbounded lifetime.
   ///
   /// # Safety
   ///
@@ -111,7 +111,7 @@ where
 ///
 /// # Safety
 ///
-/// Context must not be a type that can be invalidated as references may exist for the lifetime of the runtime.
+/// [`Context`] must not be a type that can be invalidated as references may exist for the lifetime of the runtime.
 pub unsafe trait AsContext: AsRef<Context<Self::Target>> {
   type Target: Sync + 'static;
 }
@@ -273,6 +273,7 @@ mod tests {
     make_guard!(guard);
     let counter = COUNTER.local_ref(guard);
     yield_now().await;
+    async {}.await;
     counter.fetch_add(1, Ordering::SeqCst);
   }
 

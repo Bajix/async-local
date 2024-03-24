@@ -71,7 +71,7 @@ impl Builder {
     self
   }
 
-  /// Sets the number of worker threads the `Runtime` will use.
+  /// Sets the number of worker threads the [`Runtime`] will use.
   ///
   /// This can be any number above 0 though it is advised to keep this value
   /// on the smaller side.
@@ -100,13 +100,12 @@ impl Builder {
   /// rt.spawn(async move {});
   /// ```
   ///
-  /// ## Current thread runtime (will only run on the current thread via `Runtime::block_on`)
+  /// ## Current thread runtime (will only run on the current thread via [`Runtime::block_on`])
   ///
   /// ```
   /// use async_local::runtime;
   ///
-  /// // Create a runtime that _must_ be driven from a call
-  /// // to `Runtime::block_on`.
+  /// // Create a runtime that _must_ be driven from a call to [`Runtime::block_on`].
   /// let rt = runtime::Builder::new_current_thread().build().unwrap();
   ///
   /// // This will run the runtime and future on the current thread
