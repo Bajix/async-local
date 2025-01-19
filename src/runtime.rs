@@ -25,7 +25,7 @@ enum BarrierContext {
 }
 
 thread_local! {
-  static CONTEXT: RefCell<Option<BarrierContext>> = RefCell::new(None);
+  static CONTEXT: RefCell<Option<BarrierContext>> = const { RefCell::new(None) };
 }
 
 #[derive(PartialEq, Eq)]

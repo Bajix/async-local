@@ -5,10 +5,7 @@ extern crate self as async_local;
 
 /// A Tokio Runtime builder configured with a barrier that rendezvous worker threads during shutdown as to ensure tasks never outlive local data owned by worker threads
 #[cfg(all(not(loom), feature = "tokio-runtime"))]
-#[cfg_attr(
-  docsrs,
-  doc(cfg(any(feature = "barrier-protected-runtime")))
-)]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "barrier-protected-runtime"))))]
 pub mod runtime;
 
 #[cfg(not(loom))]
@@ -162,13 +159,13 @@ where
     F: for<'a> FnOnce(LocalRef<'a, T>) -> R + Send + 'static,
     R: Send + 'static,
   {
-    let local_ref = unsafe { std::mem::transmute(self) };
+    let local_ref = unsafe { std::mem::transmute::<LocalRef<'_, T>, LocalRef<'_, T>>(self) };
 
     spawn_blocking(move || f(local_ref))
   }
 }
 
-impl<'id, T> Deref for LocalRef<'id, T>
+impl<T> Deref for LocalRef<'_, T>
 where
   T: Sync,
 {
@@ -178,7 +175,7 @@ where
   }
 }
 
-impl<'id, T> Clone for LocalRef<'id, T>
+impl<T> Clone for LocalRef<'_, T>
 where
   T: Sync + 'static,
 {
@@ -187,10 +184,10 @@ where
   }
 }
 
-impl<'id, T> Copy for LocalRef<'id, T> where T: Sync + 'static {}
+impl<T> Copy for LocalRef<'_, T> where T: Sync + 'static {}
 
-unsafe impl<'id, T> Send for LocalRef<'id, T> where T: Sync {}
-unsafe impl<'id, T> Sync for LocalRef<'id, T> where T: Sync {}
+unsafe impl<T> Send for LocalRef<'_, T> where T: Sync {}
+unsafe impl<T> Sync for LocalRef<'_, T> where T: Sync {}
 /// LocalKey extension for creating thread-safe pointers to thread-local [`Context`]
 pub trait AsyncLocal<T>
 where
