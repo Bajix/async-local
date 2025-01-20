@@ -209,6 +209,10 @@ where
   /// # Usage
   ///
   /// Use [`generativity::make_guard`] to generate a unique [`invariant`](https://doc.rust-lang.org/nomicon/subtyping.html#variance) lifetime brand
+  ///
+  /// # Safety
+  ///
+  /// When `barrier-protected-runtime` is enabled, [`tokio::main`](https://docs.rs/tokio/1/tokio/attr.test.html) or [`tokio::test`](https://docs.rs/tokio/1/tokio/attr.test.html) should be used with `crate = "async_local"` set to ensure that [`async_local::runtime::Builder`] is used. This ensures that [`generativity::make_guard`] cannot create a [`Guard`] of a lifetime outliving the runtime and synchronizes shutdown to ensure the validity of all invariant lifetimes.
   fn local_ref<'id>(&'static self, guard: Guard<'id>) -> LocalRef<'id, T::Target>;
 }
 
