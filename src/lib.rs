@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::thread::LocalKey;
 
 pub use derive_async_local::AsContext;
-use generativity::{Guard, Id};
+use generativity::{Guard, Id, make_guard};
 #[cfg(loom)]
 use loom::thread::LocalKey;
 #[doc(hidden)]
@@ -237,6 +237,11 @@ where
     F: for<'id> FnOnce(LocalRef<'id, T::Target>) -> R + Send + 'static,
     R: Send + 'static;
 
+  /// Acquire a reference to the value in this TLS key.
+  fn with_async<F, R>(&'static self, f: F) -> impl Future<Output = R>
+  where
+    F: for<'a> AsyncFnMut(LocalRef<'a, T::Target>) -> R;
+
   /// Create a pointer to a thread local [`Context`] using a trusted lifetime carrier.
   ///
   /// # Usage
@@ -245,7 +250,7 @@ where
   ///
   /// # Safety
   ///
-  /// When `barrier-protected-runtime` is enabled, [`tokio::main`](https://docs.rs/tokio/1/tokio/attr.test.html) or [`tokio::test`](https://docs.rs/tokio/1/tokio/attr.test.html) should be used with `crate = "async_local"` set to ensure that [`async_local::runtime::Builder`] is used. This ensures that [`generativity::make_guard`] cannot create a [`Guard`] of a lifetime outliving the runtime and synchronizes shutdown to ensure the validity of all invariant lifetimes.
+  /// When `barrier-protected-runtime` is enabled, [`tokio::main`](https://docs.rs/tokio/1/tokio/attr.test.html) and [`tokio::test`](https://docs.rs/tokio/1/tokio/attr.test.html) should be used with `crate = "async_local"` set to ensure that [`async_local::runtime::Builder`] is used. This ensures that [`generativity::make_guard`] cannot create a [`Guard`] of a lifetime outliving the runtime and synchronizes shutdown to ensure the validity of all invariant lifetimes.
   fn local_ref<'id>(&'static self, guard: Guard<'id>) -> LocalRef<'id, T::Target>;
 }
 
@@ -266,6 +271,14 @@ where
     let guard = unsafe { Guard::new(Id::new()) };
     let local_ref = self.local_ref(guard);
     spawn_blocking(move || f(local_ref))
+  }
+
+  async fn with_async<F, R>(&'static self, mut f: F) -> R
+  where
+    F: for<'a> AsyncFnMut(LocalRef<'a, T::Target>) -> R,
+  {
+    make_guard!(guard);
+    f(self.local_ref(guard)).await
   }
 
   fn local_ref<'id>(&'static self, guard: Guard<'id>) -> LocalRef<'id, T::Target> {
@@ -307,7 +320,6 @@ mod tests {
     make_guard!(guard);
     let counter = COUNTER.local_ref(guard);
     yield_now().await;
-    async {}.await;
     counter.fetch_add(1, Ordering::SeqCst);
   }
 
