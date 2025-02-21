@@ -1,8 +1,8 @@
 use proc_macro2::Span;
 use quote::quote;
 use syn::{
-  parse::Error, parse_macro_input, Data, DeriveInput, GenericArgument, PathArguments, Type,
-  TypePath,
+  Data, DeriveInput, GenericArgument, PathArguments, Type, TypePath, parse::Error,
+  parse_macro_input,
 };
 
 fn is_context(type_path: &TypePath) -> bool {

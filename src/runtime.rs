@@ -2,8 +2,8 @@ use std::{
   cell::RefCell,
   io,
   sync::{
-    atomic::{AtomicUsize, Ordering},
     Arc, Condvar, Mutex,
+    atomic::{AtomicUsize, Ordering},
   },
 };
 

@@ -1,6 +1,6 @@
 [package]
 authors = ["Thomas Sieverding <Thomas@bajix.com>"]
-edition = "2021"
+edition = "2024"
 name = "async-local"
 version = "2.0.1"
 description = "For using thread locals within an async context and across await points"

@@ -20,7 +20,7 @@ use loom::thread::LocalKey;
 #[cfg(all(not(loom), feature = "tokio-runtime"))]
 pub use tokio::pin;
 #[cfg(all(not(loom), feature = "tokio-runtime"))]
-use tokio::task::{spawn_blocking, JoinHandle};
+use tokio::task::{JoinHandle, spawn_blocking};
 
 /// A wrapper type used for creating pointers to thread-locals
 #[cfg(not(feature = "barrier-protected-runtime"))]
@@ -69,7 +69,7 @@ where
   ///
   /// This lifetime must be restricted to avoid unsoundness
   pub unsafe fn local_ref<'a>(&self) -> LocalRef<'a, T> {
-    LocalRef::new(self, Guard::new(Id::new()))
+    unsafe { LocalRef::new(self, Guard::new(Id::new())) }
   }
 }
 
