@@ -10,14 +10,15 @@ This crate enables references to thread locals to be used in an async context an
 
 ## How it works
 
-By using a barrier to rendezvous worker threads during runtime shutdown, it can be gauranteed that no task will outlive thread local data belonging to worker threads. With this, pointers to thread locals constrained by invariant lifetimes are guaranteed to be of a valid lifetime suitable for use accross await points.
+By configuring Tokio to a barrier to rendezvous worker threads during shutdown, it can be gauranteed that no task will outlive thread local data belonging to worker threads. With this, pointers to thread locals constrained by invariant lifetimes are guaranteed to be of a valid lifetime suitable for use accross await points.
 
 ## Runtime Configuration (optional)
 
-For best performance, use the Tokio runtime as configured via the [tokio::main](https://docs.rs/tokio/latest/tokio/attr.main.html) or [tokio::test](https://docs.rs/tokio/latest/tokio/attr.test.html) macro with the `crate` attribute set to `async_local` while the `barrier-protected-runtime` feature is enabled. Doing so configures the Tokio runtime with a barrier that rendezvous runtime worker threads during shutdown in a way that ensures tasks never outlive thread local data owned by runtime worker threads so that [Arc](https://doc.rust-lang.org/stable/std/sync/struct.Arc.html) isn't needed as a fallback.
+In order to enable the optimization this crate provides, use the Tokio runtime as configured via the [tokio::main](https://docs.rs/tokio/latest/tokio/attr.main.html) or [tokio::test](https://docs.rs/tokio/latest/tokio/attr.test.html) macro with `crate` set as `async_local` while the `barrier-protected-runtime` feature flag is enabled.
 
+## Example usage
 ```rust
-#[cfg(test)]*
+#[cfg(test)]
 mod tests {
   use std::sync::atomic::{AtomicUsize, Ordering};
 

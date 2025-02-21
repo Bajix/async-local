@@ -40,7 +40,7 @@ where
 {
   /// Create a new thread-local context
   ///
-  /// If the `barrier-protected-runtime` feature flag isn't enabled, [`Context`] will use [`std::sync::Arc`] to ensure the validity of `T`. This ensures soundness whenever it's not well-known that the async runtime is configured by this crate
+  /// If the `barrier-protected-runtime` feature flag isn't enabled, [`Context`] will use [`std::sync::Arc`] to ensure the validity of `T`
   ///
   /// # Usage
   ///
@@ -166,7 +166,9 @@ where
     F: for<'a> FnOnce(LocalRef<'a, T>) -> R + Send + 'static,
     R: Send + 'static,
   {
-    let local_ref = unsafe { std::mem::transmute::<LocalRef<'_, T>, LocalRef<'_, T>>(self) };
+    use std::mem::transmute;
+
+    let local_ref = unsafe { transmute::<LocalRef<'_, T>, LocalRef<'_, T>>(self) };
 
     spawn_blocking(move || f(local_ref))
   }
@@ -250,7 +252,7 @@ where
   ///
   /// # Safety
   ///
-  /// When `barrier-protected-runtime` is enabled, [`tokio::main`](https://docs.rs/tokio/1/tokio/attr.test.html) and [`tokio::test`](https://docs.rs/tokio/1/tokio/attr.test.html) should be used with `crate = "async_local"` set to ensure that [`async_local::runtime::Builder`] is used. This ensures that [`generativity::make_guard`] cannot create a [`Guard`] of a lifetime outliving the runtime and synchronizes shutdown to ensure the validity of all invariant lifetimes.
+  /// When `barrier-protected-runtime` is enabled, [`tokio::main`](https://docs.rs/tokio/1/tokio/attr.test.html) and [`tokio::test`](https://docs.rs/tokio/1/tokio/attr.test.html) must be used with `crate = "async_local"` set to configure the runtime to synchronize shutdown. This ensures the validity of all invariant lifetimes
   fn local_ref<'id>(&'static self, guard: Guard<'id>) -> LocalRef<'id, T::Target>;
 }
 
