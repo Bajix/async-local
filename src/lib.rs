@@ -3,14 +3,18 @@
 
 extern crate self as async_local;
 
-/// A Tokio Runtime builder configured with a barrier that rendezvous worker threads during shutdown as to ensure tasks never outlive local data owned by worker threads
+/// A Tokio Runtime builder that configures a barrier to rendezvous worker threads during shutdown to ensure tasks never outlive local data owned by worker threads
 #[cfg(all(not(loom), feature = "tokio-runtime"))]
 #[cfg_attr(docsrs, doc(cfg(any(feature = "barrier-protected-runtime"))))]
 pub mod runtime;
 
+use std::ops::Deref;
+#[cfg(feature = "barrier-protected-runtime")]
+use std::ptr::addr_of;
+#[cfg(not(feature = "barrier-protected-runtime"))]
+use std::sync::Arc;
 #[cfg(not(loom))]
 use std::thread::LocalKey;
-use std::{ops::Deref, ptr::addr_of};
 
 pub use derive_async_local::AsContext;
 use generativity::{Guard, Id};
@@ -24,7 +28,7 @@ use tokio::task::{JoinHandle, spawn_blocking};
 
 /// A wrapper type used for creating pointers to thread-locals
 #[cfg(not(feature = "barrier-protected-runtime"))]
-pub struct Context<T: Sync + 'static>(&'static T);
+pub struct Context<T: Sync + 'static>(Arc<T>);
 
 /// A wrapper type used for creating pointers to thread-locals
 #[cfg(feature = "barrier-protected-runtime")]
@@ -36,7 +40,7 @@ where
 {
   /// Create a new thread-local context
   ///
-  /// If the `barrier-protected-runtime` feature flag isn't enabled, [`Context`] will use [`Box::leak`] to avoid `T` ever being deallocated instead of relying on the provided barrier-protected Tokio runtime to ensure tasks never outlive thread local data owned by worker threads. This provides soundness at the cost of performance for whenever it's not well-known that the async runtime used is the Tokio [`runtime`] configured by this crate.
+  /// If the `barrier-protected-runtime` feature flag isn't enabled, [`Context`] will use [`std::sync::Arc`] to ensure the validity of `T`. This ensures soundness whenever it's not well-known that the async runtime is configured by this crate
   ///
   /// # Usage
   ///
@@ -60,7 +64,7 @@ where
 
   #[cfg(not(feature = "barrier-protected-runtime"))]
   pub fn new(inner: T) -> Context<T> {
-    Context(Box::leak(Box::new(inner)))
+    Context(Arc::new(inner))
   }
 
   /// Construct [`LocalRef`] with an unbounded lifetime.
@@ -89,7 +93,7 @@ where
 {
   type Target = T;
   fn deref(&self) -> &Self::Target {
-    self.0
+    self.0.as_ref()
   }
 }
 
@@ -108,7 +112,7 @@ where
 ///
 /// # Safety
 ///
-/// [`Context`] must not be a type that can be invalidated as references may exist for the lifetime of the runtime.
+/// [`Context`] must not be invalidated as references may exist for the lifetime of the runtime.
 pub unsafe trait AsContext: AsRef<Context<Self::Target>> {
   type Target: Sync + 'static;
 }
@@ -123,7 +127,10 @@ where
 /// A thread-safe pointer to a thread-local [`Context`] constrained by a "[generative](https://crates.io/crates/generativity)" lifetime brand that is [invariant](https://doc.rust-lang.org/nomicon/subtyping.html#variance) over the lifetime parameter and cannot be coerced into `'static`
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct LocalRef<'id, T: Sync + 'static> {
+  #[cfg(feature = "barrier-protected-runtime")]
   inner: *const T,
+  #[cfg(not(feature = "barrier-protected-runtime"))]
+  inner: Arc<T>,
   /// Lifetime carrier
   _brand: Id<'id>,
 }
@@ -135,7 +142,7 @@ where
   #[cfg(not(feature = "barrier-protected-runtime"))]
   unsafe fn new(context: &Context<T>, guard: Guard<'id>) -> Self {
     LocalRef {
-      inner: addr_of!(*context.0),
+      inner: context.0.clone(),
       _brand: guard.into(),
     }
   }
@@ -165,6 +172,7 @@ where
   }
 }
 
+#[cfg(feature = "barrier-protected-runtime")]
 impl<T> Deref for LocalRef<'_, T>
 where
   T: Sync,
@@ -174,17 +182,42 @@ where
     unsafe { &*self.inner }
   }
 }
+#[cfg(not(feature = "barrier-protected-runtime"))]
+impl<T> Deref for LocalRef<'_, T>
+where
+  T: Sync,
+{
+  type Target = T;
+  fn deref(&self) -> &Self::Target {
+    self.inner.deref()
+  }
+}
 
+#[cfg(feature = "barrier-protected-runtime")]
 impl<T> Clone for LocalRef<'_, T>
 where
   T: Sync + 'static,
 {
   fn clone(&self) -> Self {
-    *self
+    LocalRef {
+      inner: self.inner,
+      _brand: self._brand,
+    }
   }
 }
 
-impl<T> Copy for LocalRef<'_, T> where T: Sync + 'static {}
+#[cfg(not(feature = "barrier-protected-runtime"))]
+impl<T> Clone for LocalRef<'_, T>
+where
+  T: Sync + 'static,
+{
+  fn clone(&self) -> Self {
+    LocalRef {
+      inner: self.inner.clone(),
+      _brand: self._brand,
+    }
+  }
+}
 
 unsafe impl<T> Send for LocalRef<'_, T> where T: Sync {}
 unsafe impl<T> Sync for LocalRef<'_, T> where T: Sync {}
