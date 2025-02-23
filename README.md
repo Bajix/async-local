@@ -6,7 +6,7 @@
 
 ## Unlocking the potential of thread-locals in an async context
 
-This crate enables references to thread locals to be used in an async context and accross await points or within blocking threads managed by the Tokio runtime
+This crate enables references to thread locals to be used in an async context and across await points or within blocking threads managed by the Tokio runtime
 
 ## How it works
 
@@ -15,6 +15,10 @@ By configuring Tokio with a barrier to rendezvous worker threads during shutdown
 ## Runtime Configuration (optional)
 
 In order to enable the optimization this crate provides, use the Tokio runtime as configured via the [tokio::main](https://docs.rs/tokio/latest/tokio/attr.main.html) or [tokio::test](https://docs.rs/tokio/latest/tokio/attr.test.html) macro with `crate` set as `async_local` while the `barrier-protected-runtime` feature flag is enabled.
+
+## Safety
+
+It is unsound to enable `barrier-protected-runtime` without the recommended runtime configuration. Doing so ensures that runtime worker threads rendezvous during shutdown which prevents the possibility of dangling pointers by making it so that no task will outlive any worker thread
 
 ## Example usage
 

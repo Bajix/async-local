@@ -31,6 +31,8 @@ default = ["tokio-runtime"]
 tokio-runtime = ["tokio"]
 
 # Tokio Runtime configured with a barrier-synchronized shutdown as to ensure tasks never outlive worker thread owned local data
+# 
+# SAFETY: It is unsound to enable this feature without using the provided runtime builder exclusively
 barrier-protected-runtime = ["tokio-runtime", "tokio/rt-multi-thread"]
 
 [workspace]
