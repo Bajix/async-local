@@ -2,7 +2,7 @@
 authors = ["Thomas Sieverding <Thomas@bajix.com>"]
 edition = "2024"
 name = "async-local"
-version = "3.0.1"
+version = "3.0.2"
 description = "For using thread locals within an async context and across await points"
 readme = "./README.md"
 license = "MIT"
