@@ -1,5 +1,5 @@
 use std::{
-  cell::RefCell,
+  fmt::{self, Debug},
   io,
   sync::{
     Arc, Condvar, Mutex,
@@ -7,25 +7,13 @@ use std::{
   },
 };
 
-use tokio::runtime::Runtime;
+use crate::{BarrierContext, CONTEXT};
 
 #[derive(Default)]
 struct ShutdownBarrier {
   guard_count: AtomicUsize,
   shutdown_finalized: Mutex<bool>,
   cvar: Condvar,
-}
-
-#[derive(PartialEq, Eq, Debug)]
-enum BarrierContext {
-  /// Tokio Runtime Worker
-  RuntimeWorker,
-  /// Tokio Pool Worker
-  PoolWorker,
-}
-
-thread_local! {
-  static CONTEXT: RefCell<Option<BarrierContext>> = const { RefCell::new(None) };
 }
 
 #[derive(PartialEq, Eq)]
@@ -166,5 +154,47 @@ impl Builder {
       .on_thread_start(on_thread_start)
       .on_thread_stop(on_thread_stop)
       .build()
+      .map(Runtime)
+  }
+}
+
+pub struct Runtime(tokio::runtime::Runtime);
+
+impl Debug for Runtime {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    self.0.fmt(f)
+  }
+}
+
+impl Runtime {
+  /// Runs a future to completion on the Tokio runtime. This is the
+  /// runtime's entry point.
+  ///
+  /// This runs the given future on the current thread, blocking until it is
+  /// complete, and yielding its resolved result. Any tasks or timers
+  /// which the future spawns internally will be executed on the runtime.
+  ///
+  /// # Non-worker future
+  ///
+  /// Note that the future required by this function does not run as a
+  /// worker. The expectation is that other tasks are spawned by the future here.
+  /// Awaiting on other futures from the future provided here will not
+  /// perform as fast as those spawned as workers.
+  ///
+  /// # Panics
+  ///
+  /// This function panics if the provided future panics, or if called within an
+  /// asynchronous execution context.
+  #[track_caller]
+  pub fn block_on<F: Future>(self, future: F) -> F::Output {
+    CONTEXT.with(|context| *context.borrow_mut() = Some(BarrierContext::BlockOn));
+
+    let output = self.0.block_on(future);
+
+    CONTEXT.with(|context| *context.borrow_mut() = None::<BarrierContext>);
+
+    drop(self);
+
+    output
   }
 }

@@ -16,10 +16,6 @@ By configuring Tokio with a barrier to rendezvous worker threads during shutdown
 
 In order to enable the optimization this crate provides, use the Tokio runtime as configured via the [tokio::main](https://docs.rs/tokio/latest/tokio/attr.main.html) or [tokio::test](https://docs.rs/tokio/latest/tokio/attr.test.html) macro with `crate` set as `async_local` while the `barrier-protected-runtime` feature flag is enabled.
 
-## Safety
-
-It is unsound to enable `barrier-protected-runtime` without the recommended runtime configuration. Doing so ensures that runtime worker threads rendezvous during shutdown which prevents the possibility of dangling pointers by making it so that no task will outlive any worker thread
-
 ## Example usage
 
 ```rust

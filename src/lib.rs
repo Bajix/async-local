@@ -8,13 +8,13 @@ extern crate self as async_local;
 #[cfg_attr(docsrs, doc(cfg(any(feature = "barrier-protected-runtime"))))]
 pub mod runtime;
 
-use std::ops::Deref;
 #[cfg(feature = "barrier-protected-runtime")]
 use std::ptr::addr_of;
 #[cfg(not(feature = "barrier-protected-runtime"))]
 use std::sync::Arc;
 #[cfg(not(loom))]
 use std::thread::LocalKey;
+use std::{cell::RefCell, ops::Deref};
 
 pub use derive_async_local::AsContext;
 use generativity::{Guard, Id, make_guard};
@@ -25,6 +25,19 @@ use loom::thread::LocalKey;
 pub use tokio::pin;
 #[cfg(all(not(loom), feature = "tokio-runtime"))]
 use tokio::task::{JoinHandle, spawn_blocking};
+
+#[derive(PartialEq, Eq, Debug)]
+pub(crate) enum BarrierContext {
+  BlockOn,
+  /// Tokio Runtime Worker
+  RuntimeWorker,
+  /// Tokio Pool Worker
+  PoolWorker,
+}
+
+thread_local! {
+  pub(crate) static CONTEXT: RefCell<Option<BarrierContext>> = const { RefCell::new(None) };
+}
 
 /// A wrapper type used for creating pointers to thread-locals
 #[cfg(not(feature = "barrier-protected-runtime"))]
@@ -252,7 +265,11 @@ where
   ///
   /// # Safety
   ///
-  /// When `barrier-protected-runtime` is enabled, [`tokio::main`](https://docs.rs/tokio/1/tokio/attr.test.html) and [`tokio::test`](https://docs.rs/tokio/1/tokio/attr.test.html) must be used with `crate = "async_local"` set to configure the runtime to synchronize shutdown. This ensures the validity of all invariant lifetimes
+  /// If `barrier-protected-runtime` is enabled, [`tokio::main`](https://docs.rs/tokio/1/tokio/attr.test.html) or [`tokio::test`](https://docs.rs/tokio/1/tokio/attr.test.html) must be used with `crate = "async_local"` set to configure the runtime to synchronize shutdown. This ensures the validity of all invariant lifetimes
+  ///
+  /// # Panic
+  ///
+  /// [`LocalRef`] must be created within the async context of a Tokio Runtime configured by [`async_local::runtime::Runtime`]. If `barrier-protected-runtime` is enabled, this will be enforced by a panic
   fn local_ref<'id>(&'static self, guard: Guard<'id>) -> LocalRef<'id, T::Target>;
 }
 
@@ -280,10 +297,22 @@ where
     F: for<'a> AsyncFnMut(LocalRef<'a, T::Target>) -> R,
   {
     make_guard!(guard);
-    f(self.local_ref(guard)).await
+    let local_ref = self.local_ref(guard);
+    f(local_ref).await
   }
 
+  #[track_caller]
+  #[inline(always)]
   fn local_ref<'id>(&'static self, guard: Guard<'id>) -> LocalRef<'id, T::Target> {
+    if cfg!(feature = "barrier-protected-runtime")
+      && CONTEXT
+        .with(|context| matches!(&*context.borrow(), None | Some(BarrierContext::PoolWorker)))
+    {
+      panic!(
+        "While the `barrier-protected-runtime` feature is enabled, LocalRef can only be created within the async context of a Tokio Runtime configured by async_local."
+      );
+    }
+
     self.with(|value| unsafe { LocalRef::new(value.as_ref(), guard) })
   }
 }
