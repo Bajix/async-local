@@ -2,7 +2,7 @@
 authors = ["Thomas Sieverding <Thomas@bajix.com>"]
 edition = "2024"
 name = "async-local"
-version = "3.0.2"
+version = "4.0.0"
 description = "For using thread locals within an async context and across await points"
 readme = "./README.md"
 license = "MIT"
@@ -10,7 +10,7 @@ repository = "https://github.com/Bajix/async-local/"
 rust-version = "1.85"
 
 [dependencies]
-derive-async-local = { version = "3.0.0", path = "./derive-async-local" }
+derive-async-local = { version = "4.0.0", path = "./derive-async-local" }
 generativity = "1.1"
 num_cpus = "1.16"
 tokio = { version = "1", features = ["rt", "rt-multi-thread"], optional = true }
