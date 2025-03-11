@@ -40,12 +40,10 @@ thread_local! {
 }
 
 /// A wrapper type used for creating pointers to thread-locals
-#[cfg(not(feature = "barrier-protected-runtime"))]
-pub struct Context<T: Sync + 'static>(Arc<T>);
-
-/// A wrapper type used for creating pointers to thread-locals
-#[cfg(feature = "barrier-protected-runtime")]
-pub struct Context<T: Sync + 'static>(T);
+pub struct Context<T: Sync + 'static>(
+  #[cfg(feature = "barrier-protected-runtime")] T,
+  #[cfg(not(feature = "barrier-protected-runtime"))] Arc<T>,
+);
 
 impl<T> Context<T>
 where
@@ -70,14 +68,15 @@ where
   ///   static COUNTER: Context<AtomicUsize> = Context::new(AtomicUsize::new(0));
   /// }
   /// ```
-  #[cfg(feature = "barrier-protected-runtime")]
   pub fn new(inner: T) -> Context<T> {
-    Context(inner)
-  }
-
-  #[cfg(not(feature = "barrier-protected-runtime"))]
-  pub fn new(inner: T) -> Context<T> {
-    Context(Arc::new(inner))
+    #[cfg(feature = "barrier-protected-runtime")]
+    {
+      Context(inner)
+    }
+    #[cfg(not(feature = "barrier-protected-runtime"))]
+    {
+      Context(Arc::new(inner))
+    }
   }
 
   /// Construct [`LocalRef`] with an unbounded lifetime.
@@ -99,25 +98,20 @@ where
   }
 }
 
-#[cfg(not(feature = "barrier-protected-runtime"))]
 impl<T> Deref for Context<T>
 where
   T: Sync,
 {
   type Target = T;
   fn deref(&self) -> &Self::Target {
-    self.0.as_ref()
-  }
-}
-
-#[cfg(feature = "barrier-protected-runtime")]
-impl<T> Deref for Context<T>
-where
-  T: Sync,
-{
-  type Target = T;
-  fn deref(&self) -> &Self::Target {
-    &self.0
+    #[cfg(feature = "barrier-protected-runtime")]
+    {
+      &self.0
+    }
+    #[cfg(not(feature = "barrier-protected-runtime"))]
+    {
+      self.0.as_ref()
+    }
   }
 }
 
@@ -152,18 +146,12 @@ impl<'id, T> LocalRef<'id, T>
 where
   T: Sync + 'static,
 {
-  #[cfg(not(feature = "barrier-protected-runtime"))]
   unsafe fn new(context: &Context<T>, guard: Guard<'id>) -> Self {
     LocalRef {
-      inner: context.0.clone(),
-      _brand: guard.into(),
-    }
-  }
-
-  #[cfg(feature = "barrier-protected-runtime")]
-  unsafe fn new(context: &Context<T>, guard: Guard<'id>) -> Self {
-    LocalRef {
+      #[cfg(feature = "barrier-protected-runtime")]
       inner: addr_of!(context.0),
+      #[cfg(not(feature = "barrier-protected-runtime"))]
+      inner: context.0.clone(),
       _brand: guard.into(),
     }
   }
@@ -187,47 +175,32 @@ where
   }
 }
 
-#[cfg(feature = "barrier-protected-runtime")]
 impl<T> Deref for LocalRef<'_, T>
 where
   T: Sync,
 {
   type Target = T;
   fn deref(&self) -> &Self::Target {
-    unsafe { &*self.inner }
-  }
-}
-#[cfg(not(feature = "barrier-protected-runtime"))]
-impl<T> Deref for LocalRef<'_, T>
-where
-  T: Sync,
-{
-  type Target = T;
-  fn deref(&self) -> &Self::Target {
-    self.inner.deref()
-  }
-}
-
-#[cfg(feature = "barrier-protected-runtime")]
-impl<T> Clone for LocalRef<'_, T>
-where
-  T: Sync + 'static,
-{
-  fn clone(&self) -> Self {
-    LocalRef {
-      inner: self.inner,
-      _brand: self._brand,
+    #[cfg(feature = "barrier-protected-runtime")]
+    {
+      unsafe { &*self.inner }
+    }
+    #[cfg(not(feature = "barrier-protected-runtime"))]
+    {
+      self.inner.deref()
     }
   }
 }
 
-#[cfg(not(feature = "barrier-protected-runtime"))]
 impl<T> Clone for LocalRef<'_, T>
 where
   T: Sync + 'static,
 {
   fn clone(&self) -> Self {
     LocalRef {
+      #[cfg(feature = "barrier-protected-runtime")]
+      inner: self.inner,
+      #[cfg(not(feature = "barrier-protected-runtime"))]
       inner: self.inner.clone(),
       _brand: self._brand,
     }
@@ -304,13 +277,15 @@ where
   #[track_caller]
   #[inline(always)]
   fn local_ref<'id>(&'static self, guard: Guard<'id>) -> LocalRef<'id, T::Target> {
-    if cfg!(feature = "barrier-protected-runtime")
-      && CONTEXT
-        .with(|context| matches!(&*context.borrow(), None | Some(BarrierContext::PoolWorker)))
+    #[cfg(feature = "barrier-protected-runtime")]
     {
-      panic!(
-        "While the `barrier-protected-runtime` feature is enabled, LocalRef can only be created within the async context of a Tokio Runtime configured by async_local."
-      );
+      if CONTEXT
+        .with(|context| matches!(&*context.borrow(), None | Some(BarrierContext::PoolWorker)))
+      {
+        panic!(
+          "While the `barrier-protected-runtime` feature is enabled, LocalRef can only be created within the async context of a Tokio Runtime configured by async_local."
+        );
+      }
     }
 
     self.with(|value| unsafe { LocalRef::new(value.as_ref(), guard) })
