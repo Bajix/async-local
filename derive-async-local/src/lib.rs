@@ -74,7 +74,7 @@ pub fn derive_as_context(input: proc_macro::TokenStream) -> proc_macro::TokenStr
       }
       false
     })
-    .map(|(_, type_path)| Error::new_spanned(type_path, "Context must upholds the pin drop guarantee: it cannot be wrapped in a pointer type nor cell type and it must not be invalidated nor repurposed until dropped"))
+    .map(|(_, type_path)| Error::new_spanned(type_path, "Context cannot be wrapped in a pointer type nor cell type and must not be invalidated nor repurposed until dropped"))
     .reduce(|mut err, other| {
       err.combine(other);
       err
