@@ -14,7 +14,7 @@ By configuring Tokio with a barrier to rendezvous worker threads during shutdown
 
 ## Runtime Configuration (optional)
 
-In order to enable the optimization this crate provides, use the Tokio runtime as configured via the [tokio::main](https://docs.rs/tokio/latest/tokio/attr.main.html) or [tokio::test](https://docs.rs/tokio/latest/tokio/attr.test.html) macro with `crate` set as `async_local` while the `barrier-protected-runtime` feature flag is enabled.
+In order to enable the optimization this crate provides, use the Tokio runtime as configured via the [async_local::main](https://docs.rs/async-local/latest/async_local/attr.main.html) or [async_local::test](https://docs.rs/async-local/latest/async_local/attr.test.html) macro while the `barrier-protected-runtime` feature flag is enabled.
 
 ## Example usage
 
@@ -31,7 +31,7 @@ mod tests {
       static COUNTER: Context<AtomicUsize> = Context::new(AtomicUsize::new(0));
   }
 
-  #[tokio::test(crate = "async_local", flavor = "multi_thread")]
+  #[async_local::test]
   async fn it_increments() {
     make_guard!(guard);
     let counter = COUNTER.local_ref(guard);

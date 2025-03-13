@@ -4,8 +4,8 @@
 extern crate self as async_local;
 
 /// A Tokio Runtime builder that configures a barrier to rendezvous worker threads during shutdown to ensure tasks never outlive local data owned by worker threads
+#[doc(hidden)]
 #[cfg(all(not(loom), feature = "tokio-runtime"))]
-#[cfg_attr(docsrs, doc(cfg(any(feature = "barrier-protected-runtime"))))]
 pub mod runtime;
 
 #[cfg(feature = "barrier-protected-runtime")]
@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::thread::LocalKey;
 use std::{cell::RefCell, ops::Deref};
 
-pub use derive_async_local::AsContext;
+pub use derive_async_local::{AsContext, main, test};
 use generativity::{Guard, Id, make_guard};
 #[cfg(loom)]
 use loom::thread::LocalKey;
@@ -238,11 +238,11 @@ where
   ///
   /// # Safety
   ///
-  /// If `barrier-protected-runtime` is enabled, [`tokio::main`](https://docs.rs/tokio/1/tokio/attr.test.html) or [`tokio::test`](https://docs.rs/tokio/1/tokio/attr.test.html) must be used with `crate = "async_local"` set to configure the runtime to synchronize shutdown. This ensures the validity of all invariant lifetimes
+  /// If `barrier-protected-runtime` is enabled, [`async_local::main`] or [`async_local::test`] must be used to configure the runtime to synchronize shutdown. This ensures the validity of all invariant lifetimes
   ///
   /// # Panic
   ///
-  /// [`LocalRef`] must be created within the async context of a Tokio Runtime configured by [`async_local::runtime::Runtime`]. If `barrier-protected-runtime` is enabled, this will be enforced by a panic
+  /// [`LocalRef`] must be created within the async context of the runtime. If `barrier-protected-runtime` is enabled, this will be enforced by a panic
   fn local_ref<'id>(&'static self, guard: Guard<'id>) -> LocalRef<'id, T::Target>;
 }
 
@@ -305,7 +305,7 @@ mod tests {
       static COUNTER: Context<AtomicUsize> = Context::new(AtomicUsize::new(0));
   }
 
-  #[tokio::test(crate = "async_local", flavor = "multi_thread")]
+  #[async_local::test]
   async fn with_blocking() {
     COUNTER
       .with_blocking(|counter| counter.fetch_add(1, Ordering::Relaxed))
@@ -321,7 +321,7 @@ mod tests {
       .unwrap();
   }
 
-  #[tokio::test(crate = "async_local", flavor = "multi_thread")]
+  #[async_local::test]
   async fn ref_spans_await() {
     make_guard!(guard);
     let counter = COUNTER.local_ref(guard);
@@ -329,7 +329,7 @@ mod tests {
     counter.fetch_add(1, Ordering::SeqCst);
   }
 
-  #[tokio::test(crate = "async_local", flavor = "multi_thread")]
+  #[async_local::test]
   async fn with_async_trait() {
     struct Counter;
 

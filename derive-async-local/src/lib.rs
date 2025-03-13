@@ -5,6 +5,8 @@ use syn::{
   parse_macro_input,
 };
 
+mod entry;
+
 fn is_context(type_path: &TypePath) -> bool {
   let segments: Vec<_> = type_path
     .path
@@ -133,4 +135,169 @@ pub fn derive_as_context(input: proc_macro::TokenStream) -> proc_macro::TokenStr
   );
 
   expanded.into()
+}
+
+// Marks async function to be executed by the selected runtime.
+/// # Non-worker async function
+///
+/// Note that the async function marked with this macro does not run as a
+/// worker. The expectation is that other tasks are spawned by the function here.
+/// Awaiting on other futures from the function provided here will not
+/// perform as fast as those spawned as workers.
+///
+/// # Multi-threaded runtime
+///
+/// To use the multi-threaded runtime, the macro can be configured using
+///
+/// ```
+/// #[async_local::main(flavor = "multi_thread", worker_threads = 10)]
+/// # async fn main() {}
+/// ```
+///
+/// The `worker_threads` option configures the number of worker threads, and
+/// defaults to the number of cpus on the system. This is the default flavor.
+///
+/// Note: The multi-threaded runtime requires the `rt-multi-thread` feature
+/// flag.
+///
+/// # Current thread runtime
+///
+/// To use the single-threaded runtime known as the `current_thread` runtime,
+/// the macro can be configured using
+///
+/// ```
+/// #[async_local::main(flavor = "current_thread")]
+/// # async fn main() {}
+/// ```
+/// ## Usage
+///
+/// ### Using the multi-thread runtime
+///
+/// ```rust
+/// #[async_local::main]
+/// async fn main() {
+///   println!("Hello world");
+/// }
+/// ```
+///
+/// ### Using current thread runtime
+///
+/// The basic scheduler is single-threaded.
+///
+/// ```rust
+/// #[async_local::main(flavor = "current_thread")]
+/// async fn main() {
+///   println!("Hello world");
+/// }
+/// ```
+///
+/// ### Set number of worker threads
+///
+/// ```rust
+/// #[async_local::main(worker_threads = 2)]
+/// async fn main() {
+///   println!("Hello world");
+/// }
+/// ```
+///
+/// ### Configure the runtime to start with time paused
+///
+/// ```rust
+/// #[async_local::main(flavor = "current_thread", start_paused = true)]
+/// async fn main() {
+///   println!("Hello world");
+/// }
+/// ```
+///
+/// Note that `start_paused` requires the `test-util` feature to be enabled.
+#[proc_macro_attribute]
+pub fn main(
+  args: proc_macro::TokenStream,
+  item: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+  entry::main(args.into(), item.into(), true).into()
+}
+
+/// Marks async function to be executed by runtime, suitable to test environment.
+///
+/// Note: This macro is designed to be simplistic and targets applications that
+/// do not require a complex setup. If the provided functionality is not
+/// sufficient, you may be interested in using
+/// [Builder](../tokio/runtime/struct.Builder.html), which provides a more
+/// powerful interface.
+///
+/// # Multi-threaded runtime
+///
+/// To use the multi-threaded runtime, the macro can be configured using
+///
+/// ```no_run
+/// #[async_local::test(flavor = "multi_thread", worker_threads = 1)]
+/// async fn my_test() {
+///   assert!(true);
+/// }
+/// ```
+///
+/// The `worker_threads` option configures the number of worker threads, and
+/// defaults to the number of cpus on the system.
+///
+/// Note: The multi-threaded runtime requires the `rt-multi-thread` feature
+/// flag.
+///
+/// # Current thread runtime
+///
+/// The default test runtime is single-threaded. Each test gets a
+/// separate current-thread runtime.
+///
+/// ```no_run
+/// #[async_local::test]
+/// async fn my_test() {
+///   assert!(true);
+/// }
+/// ```
+///
+/// ## Usage
+///
+/// ### Using the multi-thread runtime
+///
+/// ```no_run
+/// #[async_local::test(flavor = "multi_thread")]
+/// async fn my_test() {
+///   assert!(true);
+/// }
+/// ```
+///
+/// ### Using current thread runtime
+///
+/// ```no_run
+/// #[async_local::test]
+/// async fn my_test() {
+///   assert!(true);
+/// }
+/// ```
+///
+/// ### Set number of worker threads
+///
+/// ```no_run
+/// #[async_local::test(flavor = "multi_thread", worker_threads = 2)]
+/// async fn my_test() {
+///   assert!(true);
+/// }
+/// ```
+///
+/// ### Configure the runtime to start with time paused
+///
+/// ```no_run
+/// #[async_local::test(start_paused = true)]
+/// async fn my_test() {
+///   assert!(true);
+/// }
+/// ```
+///
+/// Note that `start_paused` requires the `test-util` feature to be enabled.
+#[proc_macro_attribute]
+pub fn test(
+  args: proc_macro::TokenStream,
+  item: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+  entry::test(args.into(), item.into(), true).into()
 }

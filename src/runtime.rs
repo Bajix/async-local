@@ -22,6 +22,7 @@ pub(crate) enum Kind {
   MultiThread,
 }
 
+#[doc(hidden)]
 /// Builds Tokio runtime configured with a shutdown barrier
 pub struct Builder {
   kind: Kind,
@@ -158,6 +159,7 @@ impl Builder {
   }
 }
 
+#[doc(hidden)]
 pub struct Runtime(tokio::runtime::Runtime);
 
 impl Debug for Runtime {
@@ -185,15 +187,18 @@ impl Runtime {
   ///
   /// This function panics if the provided future panics, or if called within an
   /// asynchronous execution context.
+  ///
+  /// # Safety
+  /// This is internal to async_local and is meant to be used exclusively with #[async_local::main] and #[async_local::test].
   #[track_caller]
   pub fn block_on<F: Future>(self, future: F) -> F::Output {
     CONTEXT.with(|context| *context.borrow_mut() = Some(BarrierContext::BlockOn));
 
     let output = self.0.block_on(future);
 
-    CONTEXT.with(|context| *context.borrow_mut() = None::<BarrierContext>);
-
     drop(self);
+
+    CONTEXT.with(|context| *context.borrow_mut() = None::<BarrierContext>);
 
     output
   }
