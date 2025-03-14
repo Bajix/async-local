@@ -330,16 +330,28 @@ fn parse_knobs(mut input: ItemFn, is_test: bool, config: FinalConfig) -> TokenSt
     quote! {}
   };
 
+  let main_assertion = if !is_test {
+    quote! {
+        if module_path!().contains("::") {
+            panic!("#[async_local::main] can only be used on the crate root main function of a binary crate");
+        }
+    }
+  } else {
+    quote! {}
+  };
+
   let body_ident = quote! { body };
   // This explicit `return` is intentional. See tokio-rs/tokio#4636
   let last_block = quote_spanned! {last_stmt_end_span=>
       #[allow(clippy::expect_used, clippy::diverging_sub_expression, clippy::needless_return)]
       {
-          return #rt
-              .enable_all()
-              .build()
-              .expect("Failed building the Runtime")
-              .block_on(#body_ident);
+        #main_assertion
+
+        return #rt
+            .enable_all()
+            .build()
+            .expect("Failed building the Runtime")
+            .block_on(#body_ident);
       }
   };
 
@@ -390,13 +402,22 @@ pub(crate) fn main(args: TokenStream, item: TokenStream, rt_multi_thread: bool) 
     Err(e) => return token_stream_with_error(item, e),
   };
 
-  let config = if input.sig.ident == "main" && !input.sig.inputs.is_empty() {
-    let msg = "the main function cannot accept arguments";
-    Err(syn::Error::new_spanned(&input.sig.ident, msg))
+  let config = if input.sig.ident != "main" {
+    Err(syn::Error::new_spanned(
+      &input.sig.ident,
+      "macro can only be used on the root main function",
+    ))
   } else {
-    AttributeArgs::parse_terminated
-      .parse2(args)
-      .and_then(|args| build_config(&input, args, false, rt_multi_thread))
+    if !input.sig.inputs.is_empty() {
+      Err(syn::Error::new_spanned(
+        &input.sig.ident,
+        "the main function cannot accept arguments",
+      ))
+    } else {
+      AttributeArgs::parse_terminated
+        .parse2(args)
+        .and_then(|args| build_config(&input, args, false, rt_multi_thread))
+    }
   };
 
   match config {
