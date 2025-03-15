@@ -309,10 +309,10 @@ fn parse_knobs(mut input: ItemFn, is_test: bool, config: FinalConfig) -> TokenSt
 
   let mut rt = match config.flavor {
     RuntimeFlavor::CurrentThread => quote_spanned! {last_stmt_start_span=>
-        #crate_path::runtime::Builder::new_current_thread()
+        #crate_path::__runtime::Builder::new_current_thread()
     },
     RuntimeFlavor::Threaded => quote_spanned! {last_stmt_start_span=>
-        #crate_path::runtime::Builder::new_multi_thread()
+        #crate_path::__runtime::Builder::new_multi_thread()
     },
   };
   if let Some(v) = config.worker_threads {
@@ -347,11 +347,14 @@ fn parse_knobs(mut input: ItemFn, is_test: bool, config: FinalConfig) -> TokenSt
       {
         #main_assertion
 
-        return #rt
+        let runtime = #rt
             .enable_all()
             .build()
-            .expect("Failed building the Runtime")
-            .block_on(#body_ident);
+            .expect("Failed building the Runtime");
+
+        return unsafe {
+          runtime.block_on(#body_ident);
+        }
       }
   };
 

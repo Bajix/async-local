@@ -137,7 +137,8 @@ pub fn derive_as_context(input: proc_macro::TokenStream) -> proc_macro::TokenStr
   expanded.into()
 }
 
-// Marks async function to be executed by the selected runtime.
+/// Marks async function to be executed by the selected runtime.
+///
 /// # Non-worker async function
 ///
 /// Note that the async function marked with this macro does not run as a

@@ -6,7 +6,8 @@ extern crate self as async_local;
 /// A Tokio Runtime builder that configures a barrier to rendezvous worker threads during shutdown to ensure tasks never outlive local data owned by worker threads
 #[doc(hidden)]
 #[cfg(all(not(loom), feature = "tokio-runtime"))]
-pub mod runtime;
+#[path = "runtime.rs"]
+pub mod __runtime;
 
 #[cfg(feature = "barrier-protected-runtime")]
 use std::ptr::addr_of;
@@ -51,7 +52,7 @@ where
 {
   /// Create a new thread-local context
   ///
-  /// If the `barrier-protected-runtime` feature flag isn't enabled, [`Context`] will use [`std::sync::Arc`] to ensure the validity of `T`
+  /// If the `barrier-protected-runtime` feature flag isn't enabled, [`Context`] will downgrade to internally using [`std::sync::Arc`] to ensure the validity of `T`
   ///
   /// # Usage
   ///
