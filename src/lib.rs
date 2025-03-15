@@ -17,8 +17,16 @@ use std::sync::Arc;
 use std::thread::LocalKey;
 use std::{cell::RefCell, ops::Deref};
 
-pub use derive_async_local::{AsContext, main, test};
+pub use derive_async_local::AsContext;
+#[cfg(feature = "barrier-protected-runtime")]
+#[cfg_attr(docsrs, doc(cfg(feature = "barrier-protected-runtime")))]
+pub use derive_async_local::main;
+#[cfg(all(test, feature = "barrier-protected-runtime"))]
+#[cfg_attr(docsrs, doc(cfg(all(test, feature = "barrier-protected-runtime"))))]
+pub use derive_async_local::test;
 use generativity::{Guard, Id, make_guard};
+#[doc(hidden)]
+pub use linkme;
 #[cfg(loom)]
 use loom::thread::LocalKey;
 #[doc(hidden)]

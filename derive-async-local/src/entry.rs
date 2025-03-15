@@ -330,11 +330,15 @@ fn parse_knobs(mut input: ItemFn, is_test: bool, config: FinalConfig) -> TokenSt
     quote! {}
   };
 
-  let main_assertion = if !is_test {
+  let ensure_configured = if !is_test {
     quote! {
         if module_path!().contains("::") {
-            panic!("#[async_local::main] can only be used on the crate root main function of a binary crate");
+            panic!("#[async_local::main] can only be used on the crate root main function");
         }
+
+        #[async_local::linkme::distributed_slice(async_local::__runtime::RUNTIMES)]
+        #[linkme(crate = async_local::linkme)]
+        static RUNTIME_CONFIGURED: bool = true;
     }
   } else {
     quote! {}
@@ -345,7 +349,7 @@ fn parse_knobs(mut input: ItemFn, is_test: bool, config: FinalConfig) -> TokenSt
   let last_block = quote_spanned! {last_stmt_end_span=>
       #[allow(clippy::expect_used, clippy::diverging_sub_expression, clippy::needless_return)]
       {
-        #main_assertion
+        #ensure_configured
 
         let runtime = #rt
             .enable_all()

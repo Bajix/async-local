@@ -7,6 +7,8 @@ use std::{
   },
 };
 
+use linkme::distributed_slice;
+
 use crate::{BarrierContext, CONTEXT};
 
 #[derive(Default)]
@@ -201,5 +203,19 @@ impl Runtime {
     CONTEXT.with(|context| *context.borrow_mut() = None::<BarrierContext>);
 
     output
+  }
+}
+
+#[doc(hidden)]
+#[distributed_slice]
+pub static RUNTIMES: [bool];
+
+#[cfg(not(test))]
+#[ctor::ctor]
+fn assert_runtime_configured() {
+  if RUNTIMES.ne(&[true]) {
+    panic!(
+      "#[async_local::main] must be used to configure the async runtime while the `barrier-protected-runtime` feature is enabled. Doing so configures the Tokio runtime to rendezvous worker threads during shutdown so that it can be guaranteed no tasks will outlive thread local data belonging to worker threads. This ensures pointers to thread locals constrained by invariant lifetimes are guaranteed to be of a valid lifetime suitable for use accross await points."
+    );
   }
 }

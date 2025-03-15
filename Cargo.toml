@@ -10,8 +10,12 @@ repository = "https://github.com/Bajix/async-local/"
 rust-version = "1.85"
 
 [dependencies]
+ctor = { version = "0.4.1", default-features = false, features = [
+    "proc_macro",
+] }
 derive-async-local = { version = "4.0.0", path = "./derive-async-local" }
 generativity = "1.1"
+linkme = "0.3.32"
 num_cpus = "1.16"
 tokio = { version = "1", features = ["rt", "rt-multi-thread"], optional = true }
 
