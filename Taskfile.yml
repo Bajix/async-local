@@ -12,30 +12,30 @@ tasks:
 
   test:
     cmds:
-      - cargo test --features barrier-protected-runtime -- --nocapture
+      - cargo test -- --nocapture
 
   test-miri:
     cmds:
-      - cargo miri test -Z build-std --target $TARGET --features barrier-protected-runtime -- --nocapture
+      - cargo miri test -Z build-std --target $TARGET -- --nocapture
     env:
       MIRIFLAGS: -Zmiri-backtrace=full -Zmiri-disable-isolation
 
   doc:
     cmds:
-      - cargo +nightly doc -p async-local --open --features barrier-protected-runtime
+      - cargo +nightly doc -p async-local --open
     env:
       RUSTDOCFLAGS: --cfg docsrs
 
   clippy-tests:
     cmds:
-      - cargo clippy --tests --features barrier-protected-runtime
+      - cargo clippy --tests
 
   check-tests:
     cmds:
-      - cargo check --tests --features barrier-protected-runtime
+      - cargo check --tests
 
   test-address-sanitizer:
     cmds:
-      - cargo test -Z build-std --target $TARGET --features barrier-protected-runtime -- --nocapture
+      - cargo test -Z build-std --target $TARGET -- --nocapture
     ev:
       RUSTFLAGS: -Z sanitizer=address

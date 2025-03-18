@@ -357,7 +357,7 @@ fn parse_knobs(mut input: ItemFn, is_test: bool, config: FinalConfig) -> TokenSt
             .expect("Failed building the Runtime");
 
         return unsafe {
-          runtime.block_on(#body_ident);
+          runtime.block_on(#body_ident)
         }
       }
   };
@@ -414,17 +414,15 @@ pub(crate) fn main(args: TokenStream, item: TokenStream, rt_multi_thread: bool) 
       &input.sig.ident,
       "macro can only be used on the root main function",
     ))
+  } else if !input.sig.inputs.is_empty() {
+    Err(syn::Error::new_spanned(
+      &input.sig.ident,
+      "the main function cannot accept arguments",
+    ))
   } else {
-    if !input.sig.inputs.is_empty() {
-      Err(syn::Error::new_spanned(
-        &input.sig.ident,
-        "the main function cannot accept arguments",
-      ))
-    } else {
-      AttributeArgs::parse_terminated
-        .parse2(args)
-        .and_then(|args| build_config(&input, args, false, rt_multi_thread))
-    }
+    AttributeArgs::parse_terminated
+      .parse2(args)
+      .and_then(|args| build_config(&input, args, false, rt_multi_thread))
   };
 
   match config {

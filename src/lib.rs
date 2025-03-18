@@ -5,34 +5,28 @@ extern crate self as async_local;
 
 /// A Tokio Runtime builder that configures a barrier to rendezvous worker threads during shutdown to ensure tasks never outlive local data owned by worker threads
 #[doc(hidden)]
-#[cfg(all(not(loom), feature = "tokio-runtime"))]
+#[cfg(all(not(loom), feature = "rt"))]
 #[path = "runtime.rs"]
 pub mod __runtime;
 
-#[cfg(feature = "barrier-protected-runtime")]
+#[cfg(not(feature = "compat"))]
 use std::ptr::addr_of;
-#[cfg(not(feature = "barrier-protected-runtime"))]
+#[cfg(feature = "compat")]
 use std::sync::Arc;
 #[cfg(not(loom))]
 use std::thread::LocalKey;
 use std::{cell::RefCell, ops::Deref};
 
-pub use derive_async_local::AsContext;
-#[cfg(feature = "barrier-protected-runtime")]
-#[cfg_attr(docsrs, doc(cfg(feature = "barrier-protected-runtime")))]
-pub use derive_async_local::main;
-#[cfg(all(test, feature = "barrier-protected-runtime"))]
-#[cfg_attr(docsrs, doc(cfg(all(test, feature = "barrier-protected-runtime"))))]
-pub use derive_async_local::test;
+pub use derive_async_local::{AsContext, main, test};
 use generativity::{Guard, Id, make_guard};
 #[doc(hidden)]
 pub use linkme;
 #[cfg(loom)]
 use loom::thread::LocalKey;
 #[doc(hidden)]
-#[cfg(all(not(loom), feature = "tokio-runtime"))]
+#[cfg(all(not(loom), feature = "rt"))]
 pub use tokio::pin;
-#[cfg(all(not(loom), feature = "tokio-runtime"))]
+#[cfg(all(not(loom), feature = "rt"))]
 use tokio::task::{JoinHandle, spawn_blocking};
 
 #[derive(PartialEq, Eq, Debug)]
@@ -50,8 +44,8 @@ thread_local! {
 
 /// A wrapper type used for creating pointers to thread-locals
 pub struct Context<T: Sync + 'static>(
-  #[cfg(feature = "barrier-protected-runtime")] T,
-  #[cfg(not(feature = "barrier-protected-runtime"))] Arc<T>,
+  #[cfg(not(feature = "compat"))] T,
+  #[cfg(feature = "compat")] Arc<T>,
 );
 
 impl<T> Context<T>
@@ -60,7 +54,7 @@ where
 {
   /// Create a new thread-local context
   ///
-  /// If the `barrier-protected-runtime` feature flag isn't enabled, [`Context`] will downgrade to internally using [`std::sync::Arc`] to ensure the validity of `T`
+  /// If the `compat` feature flag is enabled, [`Context`] will downgrade to internally using [`std::sync::Arc`] to ensure the validity of `T`
   ///
   /// # Usage
   ///
@@ -78,11 +72,11 @@ where
   /// }
   /// ```
   pub fn new(inner: T) -> Context<T> {
-    #[cfg(feature = "barrier-protected-runtime")]
+    #[cfg(not(feature = "compat"))]
     {
       Context(inner)
     }
-    #[cfg(not(feature = "barrier-protected-runtime"))]
+    #[cfg(feature = "compat")]
     {
       Context(Arc::new(inner))
     }
@@ -113,11 +107,11 @@ where
 {
   type Target = T;
   fn deref(&self) -> &Self::Target {
-    #[cfg(feature = "barrier-protected-runtime")]
+    #[cfg(not(feature = "compat"))]
     {
       &self.0
     }
-    #[cfg(not(feature = "barrier-protected-runtime"))]
+    #[cfg(feature = "compat")]
     {
       self.0.as_ref()
     }
@@ -143,9 +137,9 @@ where
 /// A thread-safe pointer to a thread-local [`Context`] constrained by a "[generative](https://crates.io/crates/generativity)" lifetime brand that is [invariant](https://doc.rust-lang.org/nomicon/subtyping.html#variance) over the lifetime parameter and cannot be coerced into `'static`
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct LocalRef<'id, T: Sync + 'static> {
-  #[cfg(feature = "barrier-protected-runtime")]
+  #[cfg(not(feature = "compat"))]
   inner: *const T,
-  #[cfg(not(feature = "barrier-protected-runtime"))]
+  #[cfg(feature = "compat")]
   inner: Arc<T>,
   /// Lifetime carrier
   _brand: Id<'id>,
@@ -157,20 +151,17 @@ where
 {
   unsafe fn new(context: &Context<T>, guard: Guard<'id>) -> Self {
     LocalRef {
-      #[cfg(feature = "barrier-protected-runtime")]
+      #[cfg(not(feature = "compat"))]
       inner: addr_of!(context.0),
-      #[cfg(not(feature = "barrier-protected-runtime"))]
+      #[cfg(feature = "compat")]
       inner: context.0.clone(),
       _brand: guard.into(),
     }
   }
 
   /// A wrapper around [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) that safely constrains the lifetime of [`LocalRef`]
-  #[cfg(all(not(loom), feature = "tokio-runtime"))]
-  #[cfg_attr(
-    docsrs,
-    doc(cfg(any(feature = "tokio-runtime", feature = "barrier-protected-runtime")))
-  )]
+  #[cfg(all(not(loom), feature = "rt"))]
+  #[cfg_attr(docsrs, doc(cfg(feature = "rt")))]
   pub fn with_blocking<F, R>(self, f: F) -> JoinHandle<R>
   where
     F: for<'a> FnOnce(LocalRef<'a, T>) -> R + Send + 'static,
@@ -190,11 +181,11 @@ where
 {
   type Target = T;
   fn deref(&self) -> &Self::Target {
-    #[cfg(feature = "barrier-protected-runtime")]
+    #[cfg(not(feature = "compat"))]
     {
       unsafe { &*self.inner }
     }
-    #[cfg(not(feature = "barrier-protected-runtime"))]
+    #[cfg(feature = "compat")]
     {
       self.inner.deref()
     }
@@ -207,9 +198,9 @@ where
 {
   fn clone(&self) -> Self {
     LocalRef {
-      #[cfg(feature = "barrier-protected-runtime")]
+      #[cfg(not(feature = "compat"))]
       inner: self.inner,
-      #[cfg(not(feature = "barrier-protected-runtime"))]
+      #[cfg(feature = "compat")]
       inner: self.inner.clone(),
       _brand: self._brand,
     }
@@ -224,11 +215,8 @@ where
   T: AsContext,
 {
   /// A wrapper around [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) that safely constrains the lifetime of [`LocalRef`]
-  #[cfg(all(not(loom), feature = "tokio-runtime"))]
-  #[cfg_attr(
-    docsrs,
-    doc(cfg(any(feature = "tokio-runtime", feature = "barrier-protected-runtime")))
-  )]
+  #[cfg(all(not(loom), feature = "rt"))]
+  #[cfg_attr(docsrs, doc(cfg(feature = "rt")))]
   fn with_blocking<F, R>(&'static self, f: F) -> JoinHandle<R>
   where
     F: for<'id> FnOnce(LocalRef<'id, T::Target>) -> R + Send + 'static,
@@ -245,13 +233,9 @@ where
   ///
   /// Use [`generativity::make_guard`] to generate a unique [`invariant`](https://doc.rust-lang.org/nomicon/subtyping.html#variance) lifetime brand
   ///
-  /// # Safety
-  ///
-  /// If `barrier-protected-runtime` is enabled, [`async_local::main`] or [`async_local::test`] must be used to configure the runtime to synchronize shutdown. This ensures the validity of all invariant lifetimes
-  ///
   /// # Panic
   ///
-  /// [`LocalRef`] must be created within the async context of the runtime. If `barrier-protected-runtime` is enabled, this will be enforced by a panic
+  /// [`LocalRef`] must be created within the async context of the runtime.
   fn local_ref<'id>(&'static self, guard: Guard<'id>) -> LocalRef<'id, T::Target>;
 }
 
@@ -259,11 +243,8 @@ impl<T> AsyncLocal<T> for LocalKey<T>
 where
   T: AsContext,
 {
-  #[cfg(all(not(loom), feature = "tokio-runtime"))]
-  #[cfg_attr(
-    docsrs,
-    doc(cfg(any(feature = "tokio-runtime", feature = "barrier-protected-runtime")))
-  )]
+  #[cfg(all(not(loom), feature = "rt"))]
+  #[cfg_attr(docsrs, doc(cfg(feature = "rt")))]
   fn with_blocking<F, R>(&'static self, f: F) -> JoinHandle<R>
   where
     F: for<'id> FnOnce(LocalRef<'id, T::Target>) -> R + Send + 'static,
@@ -286,13 +267,13 @@ where
   #[track_caller]
   #[inline(always)]
   fn local_ref<'id>(&'static self, guard: Guard<'id>) -> LocalRef<'id, T::Target> {
-    #[cfg(feature = "barrier-protected-runtime")]
+    #[cfg(not(feature = "compat"))]
     {
       if CONTEXT
         .with(|context| matches!(&*context.borrow(), None | Some(BarrierContext::PoolWorker)))
       {
         panic!(
-          "While the `barrier-protected-runtime` feature is enabled, LocalRef can only be created within the async context of a Tokio Runtime configured by async_local."
+          "LocalRef can only be created within the async context of a Tokio Runtime configured by `#[async_local::main]` or `#[async_local::test]`"
         );
       }
     }

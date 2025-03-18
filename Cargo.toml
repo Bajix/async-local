@@ -3,7 +3,7 @@ authors = ["Thomas Sieverding <Thomas@bajix.com>"]
 edition = "2024"
 name = "async-local"
 version = "4.0.0"
-description = "For using thread locals within an async context and across await points"
+description = "For using thread locals within an async context across await points"
 readme = "./README.md"
 license = "MIT"
 repository = "https://github.com/Bajix/async-local/"
@@ -30,15 +30,18 @@ doctest = false
 bench = false
 
 [features]
-default = ["tokio-runtime"]
+default = ["rt"]
 
-# Enable with_blocking to spawn blocking tasks onto the Tokio Runtime
-tokio-runtime = ["tokio"]
+rt = ["tokio/rt"]
 
-# Tokio Runtime configured with a barrier-synchronized shutdown as to ensure tasks never outlive worker thread owned local data
-# 
-# SAFETY: It is unsound to enable this feature without using the provided runtime builder exclusively
-barrier-protected-runtime = ["tokio-runtime", "tokio/rt-multi-thread"]
+# Enable Tokio multi_thread runtime flavor
+rt-multi-thread = [
+    "rt",
+    "tokio/rt-multi-thread",
+    "derive-async-local/rt-multi-thread",
+]
+
+compat = []
 
 [workspace]
 members = ["derive-async-local"]

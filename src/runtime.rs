@@ -21,6 +21,7 @@ struct ShutdownBarrier {
 #[derive(PartialEq, Eq)]
 pub(crate) enum Kind {
   CurrentThread,
+  #[cfg(feature = "rt-multi-thread")]
   MultiThread,
 }
 
@@ -43,6 +44,7 @@ impl Builder {
   }
 
   /// Returns a new builder with the multi thread scheduler selected.
+  #[cfg(feature = "rt-multi-thread")]
   pub fn new_multi_thread() -> Builder {
     let worker_threads = std::env::var("TOKIO_WORKER_THEADS")
       .ok()
@@ -215,7 +217,7 @@ pub static RUNTIMES: [bool];
 fn assert_runtime_configured() {
   if RUNTIMES.ne(&[true]) {
     panic!(
-      "#[async_local::main] must be used to configure the async runtime while the `barrier-protected-runtime` feature is enabled. Doing so configures the Tokio runtime to rendezvous worker threads during shutdown so that it can be guaranteed no tasks will outlive thread local data belonging to worker threads. This ensures pointers to thread locals constrained by invariant lifetimes are guaranteed to be of a valid lifetime suitable for use accross await points."
+      "The #[async_local::main] macro must be used to configure the Tokio runtime for use with the async-local crate. For compatibilty with other async runtime configurations, the `compat` feature can be used to disable the optimizations this provides"
     );
   }
 }

@@ -216,7 +216,7 @@ pub fn main(
   args: proc_macro::TokenStream,
   item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
-  entry::main(args.into(), item.into(), true).into()
+  entry::main(args.into(), item.into(), cfg!(feature = "rt-multi-thread")).into()
 }
 
 /// Marks async function to be executed by runtime, suitable to test environment.
@@ -300,5 +300,5 @@ pub fn test(
   args: proc_macro::TokenStream,
   item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
-  entry::test(args.into(), item.into(), true).into()
+  entry::test(args.into(), item.into(), cfg!(feature = "rt-multi-thread")).into()
 }
