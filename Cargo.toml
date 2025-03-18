@@ -2,7 +2,7 @@
 authors = ["Thomas Sieverding <Thomas@bajix.com>"]
 edition = "2024"
 name = "async-local"
-version = "5.0.0"
+version = "5.0.1"
 description = "For using thread locals within an async context across await points"
 readme = "./README.md"
 license = "MIT"
@@ -13,7 +13,7 @@ rust-version = "1.85"
 ctor = { version = "0.4.1", default-features = false, features = [
     "proc_macro",
 ] }
-derive-async-local = { version = "5.0.0", path = "./derive-async-local" }
+derive-async-local = { version = "5.0.1", path = "./derive-async-local" }
 generativity = "1.1"
 linkme = "0.3.32"
 num_cpus = "1.16"
