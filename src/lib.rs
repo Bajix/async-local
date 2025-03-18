@@ -63,12 +63,24 @@ where
   /// # Example
   ///
   /// ```rust
-  /// use std::sync::atomic::AtomicUsize;
+  /// use std::sync::atomic::{AtomicUsize, Ordering};
   ///
-  /// use async_local::Context;
+  /// use async_local::{AsyncLocal, Context};
+  /// use generativity::make_guard;
   ///
   /// thread_local! {
   ///   static COUNTER: Context<AtomicUsize> = Context::new(AtomicUsize::new(0));
+  /// }
+  ///
+  /// #[async_local::main(flavor = "current_thread")]
+  /// async fn main() {
+  ///   make_guard!(guard);
+  ///   let counter = COUNTER.local_ref(guard);
+  ///
+  ///   let _count = counter
+  ///     .with_blocking(|counter| counter.fetch_add(1, Ordering::Relaxed))
+  ///     .await
+  ///     .unwrap();
   /// }
   /// ```
   pub fn new(inner: T) -> Context<T> {

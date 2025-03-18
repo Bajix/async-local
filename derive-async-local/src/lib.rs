@@ -137,7 +137,7 @@ pub fn derive_as_context(input: proc_macro::TokenStream) -> proc_macro::TokenStr
   expanded.into()
 }
 
-/// Marks async function to be executed by the selected runtime.
+/// Configures main to be executed by the selected Tokio runtime
 ///
 /// # Non-worker async function
 ///

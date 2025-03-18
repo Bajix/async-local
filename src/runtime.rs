@@ -217,7 +217,7 @@ pub static RUNTIMES: [bool];
 fn assert_runtime_configured() {
   if RUNTIMES.ne(&[true]) {
     panic!(
-      "The #[async_local::main] macro must be used to configure the Tokio runtime for use with the async-local crate. For compatibilty with other async runtime configurations, the `compat` feature can be used to disable the optimizations this provides"
+      "The #[async_local::main] macro must be used to configure the Tokio runtime for use with the `async-local` crate. For compatibilty with other async runtime configurations, the `compat` feature can be used to disable the optimizations this crate provides"
     );
   }
 }
