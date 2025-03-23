@@ -159,7 +159,7 @@ impl Builder {
       .on_thread_start(on_thread_start)
       .on_thread_stop(on_thread_stop)
       .build()
-      .map(Runtime)
+      .map(Runtime::new)
   }
 }
 
@@ -173,6 +173,9 @@ impl Debug for Runtime {
 }
 
 impl Runtime {
+  fn new(inner: tokio::runtime::Runtime) -> Self {
+    Runtime(inner)
+  }
   /// Runs a future to completion on the Tokio runtime. This is the
   /// runtime's entry point.
   ///
@@ -196,9 +199,16 @@ impl Runtime {
   /// This is internal to async_local and is meant to be used exclusively with #[async_local::main] and #[async_local::test].
   #[track_caller]
   pub unsafe fn block_on<F: Future>(self, future: F) -> F::Output {
+    unsafe { self.run(|handle| handle.block_on(future)) }
+  }
+
+  pub unsafe fn run<F, Output>(self, f: F) -> Output
+  where
+    F: for<'a> FnOnce(&'a tokio::runtime::Runtime) -> Output,
+  {
     CONTEXT.with(|context| *context.borrow_mut() = Some(BarrierContext::BlockOn));
 
-    let output = self.0.block_on(future);
+    let output = f(&self.0);
 
     drop(self);
 
