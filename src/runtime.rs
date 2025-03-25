@@ -206,7 +206,7 @@ impl Runtime {
   where
     F: for<'a> FnOnce(&'a tokio::runtime::Runtime) -> Output,
   {
-    CONTEXT.with(|context| *context.borrow_mut() = Some(BarrierContext::BlockOn));
+    CONTEXT.with(|context| *context.borrow_mut() = Some(BarrierContext::Owner));
 
     let output = f(&self.0);
 

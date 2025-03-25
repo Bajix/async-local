@@ -31,7 +31,7 @@ use tokio::task::{JoinHandle, spawn_blocking};
 
 #[derive(PartialEq, Eq, Debug)]
 pub(crate) enum BarrierContext {
-  BlockOn,
+  Owner,
   /// Tokio Runtime Worker
   RuntimeWorker,
   /// Tokio Pool Worker

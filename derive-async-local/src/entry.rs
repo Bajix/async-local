@@ -4,8 +4,9 @@
 use proc_macro2::{Span, TokenStream, TokenTree};
 use quote::{ToTokens, quote, quote_spanned};
 use syn::{
-  Attribute, Ident, Signature, Visibility, braced,
+  Attribute, Ident, PatType, PathSegment, Signature, Visibility, braced,
   parse::{Parse, ParseStream, Parser},
+  spanned::Spanned,
 };
 
 // syn::AttributeArgs does not implement syn::Parse
@@ -42,14 +43,26 @@ struct FinalConfig {
   flavor: RuntimeFlavor,
   worker_threads: Option<usize>,
   start_paused: Option<bool>,
+  borrow_runtime: Option<PatType>,
 }
 
-/// Config used in case of the attribute not being able to build a valid config
-const DEFAULT_ERROR_CONFIG: FinalConfig = FinalConfig {
-  flavor: RuntimeFlavor::CurrentThread,
-  worker_threads: None,
-  start_paused: None,
-};
+impl FinalConfig {
+  /// Config used in case of the attribute not being able to build a valid config
+  fn error_config(input: &ItemFn) -> Self {
+    let mut config = FinalConfig {
+      flavor: RuntimeFlavor::CurrentThread,
+      worker_threads: None,
+      start_paused: None,
+      borrow_runtime: None,
+    };
+
+    if let Ok(Some(ident)) = get_runtime_ident(&input, false) {
+      config.borrow_runtime = Some(ident.to_owned());
+    }
+
+    config
+  }
+}
 
 struct Configuration {
   rt_multi_thread_available: bool,
@@ -57,6 +70,7 @@ struct Configuration {
   flavor: Option<RuntimeFlavor>,
   worker_threads: Option<(usize, Span)>,
   start_paused: Option<(bool, Span)>,
+  borrow_runtime: Option<PatType>,
   is_test: bool,
 }
 
@@ -71,6 +85,7 @@ impl Configuration {
       flavor: None,
       worker_threads: None,
       start_paused: None,
+      borrow_runtime: None,
       is_test,
     }
   }
@@ -110,6 +125,18 @@ impl Configuration {
 
     let start_paused = parse_bool(start_paused, span, "start_paused")?;
     self.start_paused = Some((start_paused, span));
+    Ok(())
+  }
+
+  fn set_borrow_runtime(&mut self, pat_type: &PatType) -> Result<(), syn::Error> {
+    if self.borrow_runtime.is_some() {
+      return Err(syn::Error::new(
+        pat_type.span(),
+        "attempted to borrow runtime multiple times.",
+      ));
+    }
+
+    self.borrow_runtime = Some(pat_type.to_owned());
     Ok(())
   }
 
@@ -159,10 +186,13 @@ impl Configuration {
       (_, None) => None,
     };
 
+    let borrow_runtime = self.borrow_runtime.clone();
+
     Ok(FinalConfig {
       flavor,
       worker_threads,
       start_paused,
+      borrow_runtime,
     })
   }
 }
@@ -210,11 +240,6 @@ fn build_config(
   is_test: bool,
   rt_multi_thread: bool,
 ) -> Result<FinalConfig, syn::Error> {
-  if input.sig.asyncness.is_none() {
-    let msg = "the `async` keyword is missing from the function declaration";
-    return Err(syn::Error::new_spanned(input.sig.fn_token, msg));
-  }
-
   let mut config = Configuration::new(is_test, rt_multi_thread);
   let macro_name = config.macro_name();
 
@@ -286,11 +311,130 @@ fn build_config(
     }
   }
 
+  match (get_runtime_ident(&input, true)?, &input.sig.asyncness) {
+    (Some(pat), None) => {
+      config.set_borrow_runtime(pat)?;
+    }
+    (Some(_), Some(token)) => {
+      return Err(syn::Error::new(
+        token.span(),
+        "the `async` keyword cannot by used while borrowing the runtime",
+      ));
+    }
+    (None, None) => {
+      return Err(syn::Error::new_spanned(
+        input.sig.fn_token,
+        "the `async` keyword is missing from the function declaration",
+      ));
+    }
+    _ => {}
+  }
+
   config.build()
+}
+
+fn get_runtime_ident(input: &ItemFn, strict: bool) -> Result<Option<&PatType>, syn::Error> {
+  let inputs = input.sig.inputs.iter().map(|fn_arg|
+    match fn_arg {
+      syn::FnArg::Receiver(receiver) => Err(syn::Error::new(
+        receiver.span(),
+        "function cannot have receiver",
+      )),
+      syn::FnArg::Typed(pat_type) => {
+        if let syn::Type::Reference(type_reference) = pat_type.ty.as_ref() {
+          if let syn::Type::Path(type_path) = type_reference.elem.as_ref() {
+            let segments: Vec<&PathSegment> = type_path.path.segments.iter().collect();
+
+            let runtime_segment = match segments.as_slice() {
+              &[type_segment] if type_segment.ident.eq("Runtime") => type_segment,
+              &[module, type_segment]
+                if module.ident.eq("runtime") && type_segment.ident.eq(&"Runtime") =>
+              {
+                type_segment
+              }
+              &[crate_path, module, type_segment]
+                if crate_path.ident.eq("tokio")
+                  && module.ident.eq("runtime")
+                  && type_segment.ident.eq("Runtime") =>
+              {
+                type_segment
+              }
+              _ => {
+                return Err(syn::Error::new(
+                  pat_type.span(),
+                  "unsupported argument type specified",
+                ));
+              }
+            };
+
+            return match &runtime_segment.arguments {
+                  syn::PathArguments::None => Ok((pat_type, pat_type.span())),
+                  syn::PathArguments::AngleBracketed(angle_bracketed_generic_arguments) => {
+                    let arguments_len  = angle_bracketed_generic_arguments.args.len();
+
+                    if arguments_len.eq(&1) {
+                      Err(syn::Error::new(pat_type.span(), format!("Runtime takes 0 generic arguments but 1 generic argument was supplied")))
+                    } else {
+                      Err(syn::Error::new(pat_type.span(), format!("Runtime takes 0 generic arguments but {arguments_len} generic arguments were supplied")))
+                    }
+                  },
+                  syn::PathArguments::Parenthesized(_) => {
+                    Err(syn::Error::new(pat_type.span(), format!("Runtime cannot have parenthesized type parameters")))
+                  },
+                }
+            };
+          }
+
+          Err(syn::Error::new(
+            fn_arg.span(),
+            "unsupported argument type specified",
+          ))
+        }
+      }
+  );
+
+  let mut runtime_pat = None;
+  let mut error: Option<syn::Error> = None;
+
+  for result in inputs {
+    match result {
+      Ok((pat, span)) => {
+        if runtime_pat.is_some() {
+          let err = syn::Error::new(span, "attempted to borrow runtime multiple times");
+
+          if let Some(error) = &mut error {
+            error.combine(err);
+          } else {
+            error = Some(err);
+          }
+        } else {
+          if strict {
+            runtime_pat = Some(pat);
+          } else {
+            return Ok(Some(pat));
+          }
+        }
+      }
+      Err(err) => {
+        if let Some(error) = &mut error {
+          error.combine(err);
+        } else {
+          error = Some(err);
+        }
+      }
+    }
+  }
+
+  if let Some(err) = error {
+    Err(err)
+  } else {
+    Ok(runtime_pat)
+  }
 }
 
 fn parse_knobs(mut input: ItemFn, is_test: bool, config: FinalConfig) -> TokenStream {
   input.sig.asyncness = None;
+  input.sig.inputs.clear();
 
   // If type mismatch occurs, the current rustc points to the last statement.
   let (last_stmt_start_span, last_stmt_end_span) = {
@@ -331,7 +475,7 @@ fn parse_knobs(mut input: ItemFn, is_test: bool, config: FinalConfig) -> TokenSt
   };
 
   let ensure_configured = if !is_test {
-    quote! {
+    quote_spanned! { last_stmt_start_span =>
         if module_path!().contains("::") {
             panic!("#[async_local::main] can only be used on the crate root main function");
         }
@@ -345,6 +489,21 @@ fn parse_knobs(mut input: ItemFn, is_test: bool, config: FinalConfig) -> TokenSt
   };
 
   let body_ident = quote! { body };
+
+  let run = if config.borrow_runtime.is_some() {
+    quote! {
+      return unsafe {
+        runtime.run(#body_ident)
+      };
+    }
+  } else {
+    quote! {
+      return unsafe {
+        runtime.block_on(#body_ident)
+      };
+    }
+  };
+
   // This explicit `return` is intentional. See tokio-rs/tokio#4636
   let last_block = quote_spanned! {last_stmt_end_span=>
       #[allow(clippy::expect_used, clippy::diverging_sub_expression, clippy::needless_return)]
@@ -356,14 +515,17 @@ fn parse_knobs(mut input: ItemFn, is_test: bool, config: FinalConfig) -> TokenSt
             .build()
             .expect("Failed building the Runtime");
 
-        return unsafe {
-          runtime.block_on(#body_ident)
-        }
+        #run
       }
   };
 
   let body = input.body();
 
+  let body = if let Some(ident) = config.borrow_runtime {
+    quote! {
+        let body = |#ident| #body;
+    }
+  }
   // For test functions pin the body to the stack and use `Pin<&mut dyn
   // Future>` to reduce the amount of `Runtime::block_on` (and related
   // functions) copies we generate during compilation due to the generic
@@ -373,7 +535,7 @@ fn parse_knobs(mut input: ItemFn, is_test: bool, config: FinalConfig) -> TokenSt
   //
   // We don't do this for the main function as it should only be used once so
   // there will be no benefit.
-  let body = if is_test {
+  else if is_test {
     let output_type = match &input.sig.output {
       // For functions with no return value syn doesn't print anything,
       // but that doesn't work as `Output` for our boxed `Future`, so
@@ -414,11 +576,6 @@ pub(crate) fn main(args: TokenStream, item: TokenStream, rt_multi_thread: bool) 
       &input.sig.ident,
       "macro can only be used on the root main function",
     ))
-  } else if !input.sig.inputs.is_empty() {
-    Err(syn::Error::new_spanned(
-      &input.sig.ident,
-      "the main function cannot accept arguments",
-    ))
   } else {
     AttributeArgs::parse_terminated
       .parse2(args)
@@ -427,7 +584,10 @@ pub(crate) fn main(args: TokenStream, item: TokenStream, rt_multi_thread: bool) 
 
   match config {
     Ok(config) => parse_knobs(input, false, config),
-    Err(e) => token_stream_with_error(parse_knobs(input, false, DEFAULT_ERROR_CONFIG), e),
+    Err(e) => {
+      let config = FinalConfig::error_config(&input);
+      token_stream_with_error(parse_knobs(input, false, config), e)
+    }
   }
 }
 
@@ -481,7 +641,10 @@ pub(crate) fn test(args: TokenStream, item: TokenStream, rt_multi_thread: bool) 
 
   match config {
     Ok(config) => parse_knobs(input, true, config),
-    Err(e) => token_stream_with_error(parse_knobs(input, true, DEFAULT_ERROR_CONFIG), e),
+    Err(e) => {
+      let config = FinalConfig::error_config(&input);
+      token_stream_with_error(parse_knobs(input, true, config), e)
+    }
   }
 }
 
