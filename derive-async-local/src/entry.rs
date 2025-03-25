@@ -477,7 +477,7 @@ fn parse_knobs(mut input: ItemFn, is_test: bool, config: FinalConfig) -> TokenSt
   let ensure_configured = if !is_test {
     quote_spanned! { last_stmt_start_span =>
         if module_path!().contains("::") {
-            panic!("#[async_local::main] can only be used on the crate root main function");
+          panic!("#[async_local::main] can only be used on the crate root main function");
         }
 
         #[async_local::linkme::distributed_slice(async_local::__runtime::RUNTIMES)]

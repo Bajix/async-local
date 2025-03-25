@@ -143,11 +143,11 @@ pub fn derive_as_context(input: proc_macro::TokenStream) -> proc_macro::TokenStr
 ///
 /// To borrow the runtime directly, add as a function argument
 ///
-/// /// ```
-/// #[async_local::main(flavor = "multi_thread", worker_threads = 10)]
-/// # fn main(runtime: &tokio::runtime::Runtime) {}
 /// ```
-/// 
+/// #[async_local::main(flavor = "multi_thread", worker_threads = 10)]
+/// fn main(runtime: &tokio::runtime::Runtime) {}
+/// ```
+///
 /// # Non-worker async function
 ///
 /// Note that the async function marked with this macro does not run as a
@@ -162,7 +162,7 @@ pub fn derive_as_context(input: proc_macro::TokenStream) -> proc_macro::TokenStr
 /// #[async_local::main(flavor = "multi_thread", worker_threads = 10)]
 /// # async fn main() {}
 /// ```
-/// 
+///
 /// The `worker_threads` option configures the number of worker threads, and
 /// defaults to the number of cpus on the system. This is the default flavor.
 ///
@@ -186,7 +186,7 @@ pub fn derive_as_context(input: proc_macro::TokenStream) -> proc_macro::TokenStr
 ///   println!("Hello world");
 /// }
 /// ```
-/// 
+///
 /// ### Using current thread runtime
 ///
 /// The basic scheduler is single-threaded.
@@ -196,7 +196,7 @@ pub fn derive_as_context(input: proc_macro::TokenStream) -> proc_macro::TokenStr
 ///   println!("Hello world");
 /// }
 /// ```
-/// 
+///
 /// ### Set number of worker threads
 /// ```rust
 /// #[async_local::main(worker_threads = 2)]
@@ -204,7 +204,7 @@ pub fn derive_as_context(input: proc_macro::TokenStream) -> proc_macro::TokenStr
 ///   println!("Hello world");
 /// }
 /// ```
-/// 
+///
 /// ### Configure the runtime to start with time paused
 /// ```rust
 /// #[async_local::main(flavor = "current_thread", start_paused = true)]
@@ -212,7 +212,7 @@ pub fn derive_as_context(input: proc_macro::TokenStream) -> proc_macro::TokenStr
 ///   println!("Hello world");
 /// }
 /// ```
-/// 
+///
 /// Note that `start_paused` requires the `test-util` feature to be enabled on `tokio`.
 #[proc_macro_attribute]
 pub fn main(
@@ -228,11 +228,15 @@ pub fn main(
 ///
 /// To borrow the runtime directly, add as a function argument
 ///
-/// /// ```
-/// #[async_local::main(flavor = "multi_thread", worker_threads = 10)]
-/// # fn main(runtime: &tokio::runtime::Runtime) {}
 /// ```
-/// 
+/// #[async_local::test(flavor = "multi_thread", worker_threads = 10)]
+/// fn test(runtime: &tokio::runtime::Runtime) {
+///   runtime.block_on(async {
+///     assert!(true);
+///   });
+/// }
+/// ```
+///
 /// # Multi-threaded runtime
 ///
 /// To use the multi-threaded runtime, the macro can be configured using
@@ -242,7 +246,7 @@ pub fn main(
 ///   assert!(true);
 /// }
 /// ```
-/// 
+///
 /// The `worker_threads` option configures the number of worker threads, and
 /// defaults to the number of cpus on the system.
 ///
@@ -259,7 +263,7 @@ pub fn main(
 ///   assert!(true);
 /// }
 /// ```
-/// 
+///
 /// ## Usage
 ///
 /// ### Using the multi-thread runtime
@@ -269,7 +273,7 @@ pub fn main(
 ///   assert!(true);
 /// }
 /// ```
-/// 
+///
 /// ### Using current thread runtime
 /// ```no_run
 /// #[async_local::test]
@@ -277,7 +281,7 @@ pub fn main(
 ///   assert!(true);
 /// }
 /// ```
-/// 
+///
 /// ### Set number of worker threads
 /// ```no_run
 /// #[async_local::test(flavor = "multi_thread", worker_threads = 2)]
@@ -285,7 +289,7 @@ pub fn main(
 ///   assert!(true);
 /// }
 /// ```
-/// 
+///
 /// ### Configure the runtime to start with time paused
 /// ```no_run
 /// #[async_local::test(start_paused = true)]
@@ -293,7 +297,7 @@ pub fn main(
 ///   assert!(true);
 /// }
 /// ```
-/// 
+///
 /// Note that `start_paused` requires the `test-util` feature to be enabled on `tokio``.
 #[proc_macro_attribute]
 pub fn test(

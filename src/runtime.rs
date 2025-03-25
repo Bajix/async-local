@@ -77,34 +77,6 @@ impl Builder {
   ///
   /// When using the `current_thread` runtime this method has no effect.
   ///
-  /// # Examples
-  ///
-  /// ## Multi threaded runtime with 4 threads
-  ///
-  /// ```
-  /// use async_local::runtime;
-  ///
-  /// // This will spawn a work-stealing runtime with 4 worker threads.
-  /// let rt = runtime::Builder::new_multi_thread()
-  ///   .worker_threads(4)
-  ///   .build()
-  ///   .unwrap();
-  ///
-  /// rt.spawn(async move {});
-  /// ```
-  ///
-  /// ## Current thread runtime (will only run on the current thread via [`Runtime::block_on`])
-  ///
-  /// ```
-  /// use async_local::runtime;
-  ///
-  /// // Create a runtime that _must_ be driven from a call to [`Runtime::block_on`].
-  /// let rt = runtime::Builder::new_current_thread().build().unwrap();
-  ///
-  /// // This will run the runtime and future on the current thread
-  /// rt.block_on(async move {});
-  /// ```
-  ///
   /// # Panics
   ///
   /// This will panic if `val` is not larger than `0`.
