@@ -16,6 +16,18 @@ By configuring Tokio with a barrier to rendezvous worker threads during shutdown
 
 The optimization that this crate provides require that the [async_local::main](https://docs.rs/async-local/latest/async_local/attr.main.html) or [async_local::test](https://docs.rs/async-local/latest/async_local/attr.test.html) macro be used to configure the Tokio runtime. This is enforced by a pre-main check that asserts [async_local::main](https://docs.rs/async-local/latest/async_local/attr.main.html) has been used.
 
+## Tests
+
+Running tests requires the `compat` feature. To enable the feature just for your development environment, add the crate with this feature to your `dev-dependencies` in `Cargo.toml`:
+
+```toml
+[dependencies]
+async-local = "6.0.1"
+
+[dev-dependencies]
+async-local = { version = "6.0.1", features = ["compat"] }
+```
+
 ## Compatibility Mode
 
 Enabling the `compat` feature flag will allow this crate to be used with any runtime configuration by disabling the performance optimization this crate provides and instead internally using `std::sync::Arc`
