@@ -1,11 +1,12 @@
 {
-    "editor.formatOnSave": true,
-    "rust-analyzer.rustfmt.extraArgs": [
-      "+nightly"
-    ],
-    "yaml.schemas": {
-      "https://taskfile.dev/schema.json": [
-        "**/Taskfile.yml",
-      ]
-    }
+  "editor.tabSize": 2,
+  "editor.formatOnSave": true,
+  "rust-analyzer.rustfmt.extraArgs": [
+    "+nightly"
+  ],
+  "yaml.schemas": {
+    "https://taskfile.dev/schema.json": [
+      "**/Taskfile.yml",
+    ]
   }
+}
