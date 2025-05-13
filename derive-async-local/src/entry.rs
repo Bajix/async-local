@@ -482,10 +482,14 @@ fn parse_knobs(mut input: ItemFn, is_test: bool, config: FinalConfig) -> TokenSt
 
         #[async_local::linkme::distributed_slice(async_local::__runtime::RUNTIMES)]
         #[linkme(crate = async_local::linkme)]
-        static RUNTIME_CONFIGURED: bool = true;
+        static RUNTIME_CONTEXT: async_local::__runtime::RuntimeContext = async_local::__runtime::RuntimeContext::Main;
     }
   } else {
-    quote! {}
+    quote_spanned! { last_stmt_start_span =>
+        #[async_local::linkme::distributed_slice(async_local::__runtime::RUNTIMES)]
+        #[linkme(crate = async_local::linkme)]
+        static RUNTIME_CONTEXT: async_local::__runtime::RuntimeContext = async_local::__runtime::RuntimeContext::Test;
+    }
   };
 
   let body_ident = quote! { body };

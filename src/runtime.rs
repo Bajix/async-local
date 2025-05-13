@@ -191,15 +191,36 @@ impl Runtime {
 }
 
 #[doc(hidden)]
-#[distributed_slice]
-pub static RUNTIMES: [bool];
+#[derive(Debug, PartialEq, Eq)]
+pub enum RuntimeContext {
+  Main,
+  Test,
+}
 
-#[cfg(not(test))]
+#[doc(hidden)]
+#[distributed_slice]
+pub static RUNTIMES: [RuntimeContext];
+
+#[cfg(not(feature = "compat"))]
 #[ctor::ctor]
 fn assert_runtime_configured() {
-  if RUNTIMES.ne(&[true]) {
+  if RUNTIMES.is_empty() {
     panic!(
-      "The #[async_local::main] macro must be used to configure the Tokio runtime for use with the `async-local` crate. For compatibilty with other async runtime configurations, the `compat` feature can be used to disable the optimizations this crate provides"
+      "The #[async_local::main] or #[async_local::test] macro must be used to configure the Tokio runtime for use with the `async-local` crate. For compatibilty with other async runtime configurations, the `compat` feature can be used to disable the optimizations this crate provides"
     );
+  }
+
+  if RUNTIMES
+    .iter()
+    .fold(0, |acc, context| {
+      if context.eq(&RuntimeContext::Main) {
+        acc + 1
+      } else {
+        acc
+      }
+    })
+    .gt(&1)
+  {
+    panic!("The #[async_local::main] macro cannot be used more than once");
   }
 }
